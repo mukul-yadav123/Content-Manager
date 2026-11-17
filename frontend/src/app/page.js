@@ -92,7 +92,7 @@ export default function Home() {
           <h3 className="text-base font-bold text-gray-900 mb-3">Architecture Verification Checklist</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 text-xs text-gray-700">
             <div className="flex items-center gap-2 p-2.5 rounded-lg bg-green-50 text-green-900 font-medium border border-green-200">
-              <span>✓</span> Monorepo Layout (client / server)
+              <span>✓</span> Two-Folder Structure (frontend / backend)
             </div>
             <div className="flex items-center gap-2 p-2.5 rounded-lg bg-green-50 text-green-900 font-medium border border-green-200">
               <span>✓</span> Next.js App Router (JavaScript)

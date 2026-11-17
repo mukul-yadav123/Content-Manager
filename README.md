@@ -4,37 +4,25 @@ An enterprise-ready, modular studio designed to research current industry news, 
 
 ---
 
-## Architecture Overview
+## Folder Structure
 
-- **Monorepo Structure**: Complete separation between `client/` and `server/`.
-- **Frontend**: Next.js App Router, React 19, Tailwind CSS, Responsive Design, and Native JavaScript (no TypeScript).
-- **Backend**: Node.js & Express.js with native ES Modules (`"type": "module"`).
-- **Separation of Concerns**: Strict 3-tier layered architecture (`routes/` -> `controllers/` -> `services/` -> `models/`).
-- **Prompt Engineering**: Prompts isolated into individual parameterizable modules in `prompts/`.
-- **Task Queue & Cache**: BullMQ powered by Redis for background AI generation and web research.
-- **Storage**: Cloudinary SDK for persistent image and carousel asset hosting.
-- **Validation & Security**: Zod runtime schema validation for request payloads and environment variables; Helmet and CORS security headers.
-- **Centralized Error Handling & Logging**: Standardized `ApiError` hierarchy, Winston structured logging, and Morgan HTTP profiling.
-- **Multi-User Ready**: Mongoose schemas designed from the foundation with `userId` tenancy bindings.
-
----
-
-## Project Structure
+The project has **only two main folders**: `frontend` and `backend`. All respective dependencies, configurations, and code live strictly inside their own directory.
 
 ```
 Content-Manager/
-├── ARCHITECTURE.md                  # Detailed system architecture document
-├── README.md                        # Documentation and operations guide
-├── package.json                     # Monorepo runner scripts (concurrently)
+├── README.md                        # Documentation and run instructions
 ├── .gitignore                       # Global git ignore configuration
 │
-├── client/                          # Next.js App Router Frontend
-│   ├── package.json
+├── frontend/                        # Next.js App Router Frontend (JavaScript)
+│   ├── package.json                 # Frontend dependencies & scripts
+│   ├── package-lock.json
 │   ├── next.config.mjs
 │   ├── tailwind.config.js
 │   ├── jsconfig.json                # Root alias resolution (@/*)
 │   ├── .env.example                 # Example client environment variables
 │   ├── .env.local                   # Active client environment variables
+│   ├── node_modules/                # Frontend dependencies
+│   ├── public/                      # Static assets
 │   └── src/
 │       ├── app/
 │       │   ├── layout.js            # Root layout
@@ -48,10 +36,12 @@ Content-Manager/
 │       └── services/
 │           └── api.js               # Reusable frontend API client
 │
-└── server/                          # Express.js Backend (ESM)
-    ├── package.json                 # Native ES Modules ("type": "module")
+└── backend/                         # Express.js Backend (Native ES Modules)
+    ├── package.json                 # Backend dependencies & scripts ("type": "module")
+    ├── package-lock.json
     ├── .env.example                 # Example server environment variables
     ├── .env                         # Active server environment variables
+    ├── node_modules/                # Backend dependencies
     └── src/
         ├── app.js                   # Express application setup
         ├── server.js                # Server entrypoint and graceful shutdown
@@ -100,110 +90,54 @@ Content-Manager/
 
 ## Environment Variables
 
-### Backend (`server/.env`)
-Copy `server/.env.example` to `server/.env`:
-```bash
-cp server/.env.example server/.env
+### Backend (`backend/.env`)
+Template available in `backend/.env.example`:
+```ini
+PORT=5000
+NODE_ENV=development
+CLIENT_URL=http://localhost:3000
+
+MONGO_URI=mongodb://localhost:27017/linkedin_content_studio
+
+REDIS_HOST=127.0.0.1
+REDIS_PORT=6379
+REDIS_PASSWORD=
+
+OPENAI_API_KEY=mock-key-replace-with-real-key
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_IMAGE_MODEL=dall-e-3
+
+CLOUDINARY_CLOUD_NAME=mock_cloud_name
+CLOUDINARY_API_KEY=mock_api_key
+CLOUDINARY_API_SECRET=mock_api_secret
 ```
 
-| Key | Description | Default |
-| :--- | :--- | :--- |
-| `PORT` | Backend listening port | `5000` |
-| `NODE_ENV` | Environment (`development` \| `production` \| `test`) | `development` |
-| `CLIENT_URL` | Allowed CORS origin | `http://localhost:3000` |
-| `MONGO_URI` | MongoDB connection URI | `mongodb://localhost:27017/linkedin_content_studio` |
-| `REDIS_HOST` | Redis host | `127.0.0.1` |
-| `REDIS_PORT` | Redis port | `6379` |
-| `REDIS_PASSWORD`| Redis password (optional) | `""` |
-| `OPENAI_API_KEY`| OpenAI API key | *Required for live AI generation* |
-| `OPENAI_MODEL` | Text generation model | `gpt-4o-mini` |
-| `OPENAI_IMAGE_MODEL`| Image generation model | `dall-e-3` |
-| `CLOUDINARY_CLOUD_NAME` | Cloudinary cloud identifier | *Required for live CDN* |
-| `CLOUDINARY_API_KEY` | Cloudinary API key | *Required for live CDN* |
-| `CLOUDINARY_API_SECRET` | Cloudinary API secret | *Required for live CDN* |
-
-### Frontend (`client/.env.local`)
-Copy `client/.env.example` to `client/.env.local`:
-```bash
-cp client/.env.example client/.env.local
+### Frontend (`frontend/.env.local`)
+Template available in `frontend/.env.example`:
+```ini
+NEXT_PUBLIC_API_URL=http://localhost:5000/api
 ```
-
-| Key | Description | Default |
-| :--- | :--- | :--- |
-| `NEXT_PUBLIC_API_URL` | Backend API base URL | `http://localhost:5000/api` |
 
 ---
 
 ## How to Run the Application
 
-### 1. Install All Dependencies
-From the repository root:
-```bash
-npm run install:all
-```
+Since both folders are completely self-contained, you run each service from its own directory:
 
-### 2. Run Both Services Concurrently
+### 1. Run Backend Server
 ```bash
+cd backend
 npm run dev
 ```
-This runs:
-- **Frontend**: Next.js App Router at [http://localhost:3000](http://localhost:3000)
-- **Backend**: Express API server at [http://localhost:5000](http://localhost:5000)
+- Listens on `http://localhost:5000`
+- Live ping endpoint: `http://localhost:5000/api/health/ping`
+- Live readiness check: `http://localhost:5000/api/health/ready`
 
-### 3. Run Services Individually
-- **Backend only**:
-  ```bash
-  npm run dev:server
-  ```
-- **Frontend only**:
-  ```bash
-  npm run dev:client
-  ```
-
----
-
-## Health Check & Verification Endpoints
-
-- **Liveness Ping**:
-  ```
-  GET http://localhost:5000/api/health/ping
-  ```
-  Response:
-  ```json
-  {
-    "statusCode": 200,
-    "data": {
-      "service": "linkedin-content-studio-api",
-      "status": "online",
-      "timestamp": "2026-11-17T06:21:00.000Z",
-      "uptimeSeconds": 12,
-      "environment": "development"
-    },
-    "message": "Service is healthy",
-    "success": true
-  }
-  ```
-
-- **Subsystem Readiness**:
-  ```
-  GET http://localhost:5000/api/health/ready
-  ```
-  Response:
-  ```json
-  {
-    "statusCode": 200,
-    "data": {
-      "status": "ready",
-      "timestamp": "2026-11-17T06:21:00.000Z",
-      "systems": {
-        "database": { "status": "disconnected", "isConnected": false },
-        "redis": { "status": "disconnected", "isConnected": false },
-        "cloudinary": { "isConfigured": false, "cloudName": "mock/unconfigured" },
-        "aiService": { "isConfigured": false, "textModel": "gpt-4o-mini", "imageModel": "dall-e-3" }
-      }
-    },
-    "message": "Readiness check complete",
-    "success": true
-  }
-  ```
-
+### 2. Run Frontend Client
+In a separate terminal:
+```bash
+cd frontend
+npm run dev
+```
+- Available at `http://localhost:3000`
+- Displays the interactive Content Studio dashboard and verifies backend connection in real time.
