@@ -225,6 +225,68 @@ export const newsApi = {
 };
 
 /**
+ * Content Studio & Post Generation Endpoints
+ */
+export const studioApi = {
+  generate: (payload) =>
+    apiRequest('/studio/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  getDrafts: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.page) query.set('page', params.page);
+    if (params.limit) query.set('limit', params.limit);
+    if (params.status && params.status !== 'all') query.set('status', params.status);
+    if (params.topicId) query.set('topicId', params.topicId);
+    if (params.newsArticleId) query.set('newsArticleId', params.newsArticleId);
+    if (params.search) query.set('search', params.search);
+    if (params.sortBy) query.set('sortBy', params.sortBy);
+    if (params.sortOrder) query.set('sortOrder', params.sortOrder);
+    const qs = query.toString();
+    return apiRequest(`/studio/drafts${qs ? `?${qs}` : ''}`);
+  },
+
+  getDraftById: (id) => apiRequest(`/studio/drafts/${id}`),
+
+  selectVariation: (id, payload) =>
+    apiRequest(`/studio/drafts/${id}/select-variation`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
+
+  regenerateHooks: (id, payload = {}) =>
+    apiRequest(`/studio/drafts/${id}/regenerate-hooks`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  regeneratePost: (id, payload = {}) =>
+    apiRequest(`/studio/drafts/${id}/regenerate-post`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  changeAngle: (id, payload) =>
+    apiRequest(`/studio/drafts/${id}/angle`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
+
+  updateDraft: (id, payload) =>
+    apiRequest(`/studio/drafts/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  deleteDraft: (id) =>
+    apiRequest(`/studio/drafts/${id}`, {
+      method: 'DELETE'
+    })
+};
+
+/**
  * Health check endpoints
  */
 export const healthApi = {
@@ -237,6 +299,7 @@ export default {
   authApi,
   topicApi,
   newsApi,
+  studioApi,
   dashboardApi,
   healthApi,
   getAuthToken,

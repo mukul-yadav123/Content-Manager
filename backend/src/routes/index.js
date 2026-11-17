@@ -4,6 +4,7 @@ import authRoutes from './auth.routes.js';
 import topicRoutes from './topic.routes.js';
 import dashboardRoutes from './dashboard.routes.js';
 import newsRoutes from './news.routes.js';
+import studioRoutes from './studio.routes.js';
 
 const router = Router();
 
@@ -18,6 +19,9 @@ router.use('/topics', topicRoutes);
 
 // Mount News Discovery routes
 router.use('/news', newsRoutes);
+
+// Mount Studio & Content Generation routes
+router.use('/studio', studioRoutes);
 
 // Mount Dashboard Statistics routes
 router.use('/dashboard', dashboardRoutes);

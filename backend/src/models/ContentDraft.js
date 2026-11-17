@@ -24,6 +24,29 @@ const revisionSchema = new mongoose.Schema(
   { _id: true }
 );
 
+// Schema for individual generation approach variation
+const postVariationSchema = new mongoose.Schema(
+  {
+    variationId: { type: String, required: true },
+    approach: {
+      type: String,
+      enum: ['news_update', 'industry_analysis', 'professional_opinion'],
+      required: true
+    },
+    approachLabel: { type: String, default: '' },
+    headline: { type: String, default: '' },
+    hookOptions: { type: [String], default: [] },
+    selectedHook: { type: String, default: '' },
+    content: { type: String, required: true },
+    keyTakeaways: { type: [String], default: [] },
+    closingQuestion: { type: String, default: '' },
+    hashtags: { type: [String], default: [] },
+    sourceAttribution: { type: String, default: '' },
+    suggestedImageConcept: { type: String, default: '' }
+  },
+  { _id: true }
+);
+
 const contentDraftSchema = new mongoose.Schema(
   {
     userId: {
@@ -50,13 +73,14 @@ const contentDraftSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Draft title is required'],
       trim: true,
-      maxlength: [200, 'Title cannot exceed 200 characters']
+      maxlength: [300, 'Title cannot exceed 300 characters']
     },
+    // Primary active post fields (synchronized with selected variation)
     hook: {
       type: String,
       required: [true, 'Hook is required'],
       trim: true,
-      maxlength: [280, 'Hook should be concise (max 280 characters)']
+      maxlength: [500, 'Hook should be concise']
     },
     body: {
       type: String,
@@ -66,7 +90,7 @@ const contentDraftSchema = new mongoose.Schema(
       type: String,
       default: '',
       trim: true,
-      maxlength: [200, 'CTA cannot exceed 200 characters']
+      maxlength: [300, 'CTA cannot exceed 300 characters']
     },
     hashtags: {
       type: [String],
@@ -83,6 +107,65 @@ const contentDraftSchema = new mongoose.Schema(
       enum: ['draft', 'reviewing', 'ready', 'published', 'archived'],
       default: 'draft',
       index: true
+    },
+    // The 3 generated variations stored for side-by-side comparison
+    variations: {
+      type: [postVariationSchema],
+      default: []
+    },
+    selectedApproach: {
+      type: String,
+      enum: ['news_update', 'industry_analysis', 'professional_opinion'],
+      default: 'news_update'
+    },
+    // Input parameters used for generation
+    targetAudience: {
+      type: String,
+      default: 'Industry professionals and decision makers'
+    },
+    contentAngle: {
+      type: String,
+      default: ''
+    },
+    preferredStyle: {
+      type: String,
+      default: 'authoritative'
+    },
+    // Separation between initial AI drafts and humanized versions
+    isHumanized: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
+    initialDraft: {
+      hook: { type: String, default: '' },
+      body: { type: String, default: '' },
+      cta: { type: String, default: '' },
+      hashtags: { type: [String], default: [] }
+    },
+    humanizedDraft: {
+      hook: { type: String, default: '' },
+      body: { type: String, default: '' },
+      cta: { type: String, default: '' },
+      hashtags: { type: [String], default: [] },
+      humanizedAt: { type: Date }
+    },
+    // Ancillary metadata
+    keyTakeaways: {
+      type: [String],
+      default: []
+    },
+    closingQuestion: {
+      type: String,
+      default: ''
+    },
+    sourceAttribution: {
+      type: String,
+      default: ''
+    },
+    suggestedImageConcept: {
+      type: String,
+      default: ''
     },
     carouselSlides: {
       type: [carouselSlideSchema],
@@ -123,11 +206,22 @@ const contentDraftSchema = new mongoose.Schema(
   }
 );
 
-// Pre-save hook to calculate character count and word count automatically
+// Pre-save hook: auto-calculate character and word count, and initialize initialDraft
 contentDraftSchema.pre('save', function (next) {
   const fullText = `${this.hook || ''}\n\n${this.body || ''}\n\n${this.cta || ''}`.trim();
   this.characterCount = fullText.length;
   this.wordCount = fullText.split(/\s+/).filter(Boolean).length;
+
+  // Preserve initial draft separate from humanized versions
+  if (!this.initialDraft || !this.initialDraft.body) {
+    this.initialDraft = {
+      hook: this.hook || '',
+      body: this.body || '',
+      cta: this.cta || '',
+      hashtags: this.hashtags || []
+    };
+  }
+
   next();
 });
 
@@ -135,8 +229,9 @@ contentDraftSchema.pre('save', function (next) {
 contentDraftSchema.index({ userId: 1, status: 1 });
 contentDraftSchema.index({ userId: 1, createdAt: -1 });
 contentDraftSchema.index({ userId: 1, topicId: 1 });
+contentDraftSchema.index({ userId: 1, newsArticleId: 1 });
 contentDraftSchema.index({ userId: 1, format: 1 });
+contentDraftSchema.index({ userId: 1, isHumanized: 1 });
 
 export const ContentDraft = mongoose.model('ContentDraft', contentDraftSchema);
 export default ContentDraft;
-
