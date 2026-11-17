@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
-import { studioApi, newsApi, profileApi, mediaApi } from '@/services/api';
+import { studioApi, newsApi, profileApi, mediaApi, carouselApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 
 const IMAGE_STYLES = [
@@ -57,6 +57,63 @@ const ASPECT_RATIOS = [
   { id: '16:9', label: '16:9 Landscape', sub: 'Hero & Article Banner', dimensions: '1792×1024' }
 ];
 
+const CAROUSEL_THEMES = [
+  {
+    id: 'modern_navy',
+    name: 'Modern Navy',
+    bg: '#0A1128',
+    cardBg: '#132247',
+    text: '#FFFFFF',
+    accent: '#38BDF8',
+    secondary: '#94A3B8'
+  },
+  {
+    id: 'minimal_light',
+    name: 'Minimal Light',
+    bg: '#F8FAFC',
+    cardBg: '#FFFFFF',
+    text: '#0F172A',
+    accent: '#2563EB',
+    secondary: '#475569'
+  },
+  {
+    id: 'executive_slate',
+    name: 'Executive Slate',
+    bg: '#0F172A',
+    cardBg: '#1E293B',
+    text: '#F8FAFC',
+    accent: '#F59E0B',
+    secondary: '#94A3B8'
+  },
+  {
+    id: 'obsidian_purple',
+    name: 'Obsidian Purple',
+    bg: '#090514',
+    cardBg: '#180E2E',
+    text: '#FAF5FF',
+    accent: '#C084FC',
+    secondary: '#A855F7'
+  },
+  {
+    id: 'emerald_growth',
+    name: 'Emerald Growth',
+    bg: '#022018',
+    cardBg: '#064E3B',
+    text: '#F0FDF4',
+    accent: '#34D399',
+    secondary: '#6EE7B7'
+  },
+  {
+    id: 'sunset_ember',
+    name: 'Sunset Ember',
+    bg: '#181210',
+    cardBg: '#2E1912',
+    text: '#FFF7ED',
+    accent: '#FB923C',
+    secondary: '#FDBA74'
+  }
+];
+
 function StudioWorkspaceContent() {
   const searchParams = useSearchParams();
   const preselectedArticleId = searchParams?.get('articleId');
@@ -105,6 +162,29 @@ function StudioWorkspaceContent() {
   const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
   const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
   const [promptPreviewData, setPromptPreviewData] = useState(null);
+
+  // Carousel Studio States
+  const [activeStudioTab, setActiveStudioTab] = useState('post'); // 'post' | 'carousel'
+  const [currentCarousel, setCurrentCarousel] = useState(null);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [carouselSlideCount, setCarouselSlideCount] = useState(6);
+  const [carouselTheme, setCarouselTheme] = useState('modern_navy');
+  const [carouselAspectRatio, setCarouselAspectRatio] = useState('4:5');
+  const [isGeneratingCarousel, setIsGeneratingCarousel] = useState(false);
+  const [isRenderingCarousel, setIsRenderingCarousel] = useState(false);
+  const [isRegeneratingSlide, setIsRegeneratingSlide] = useState(false);
+  const [isSavingSlide, setIsSavingSlide] = useState(false);
+  const [isSlideRegenModalOpen, setIsSlideRegenModalOpen] = useState(false);
+  const [slideRegenInstructions, setSlideRegenInstructions] = useState('');
+
+  // Slide Inline Editing States
+  const [slideEditBadge, setSlideEditBadge] = useState('');
+  const [slideEditHeading, setSlideEditHeading] = useState('');
+  const [slideEditSubheading, setSlideEditSubheading] = useState('');
+  const [slideEditBody, setSlideEditBody] = useState('');
+  const [slideEditBullets, setSlideEditBullets] = useState([]);
+  const [slideEditStatValue, setSlideEditStatValue] = useState('');
+  const [slideEditStatLabel, setSlideEditStatLabel] = useState('');
 
   // UI Feedback States
   const [loadingArticles, setLoadingArticles] = useState(true);
@@ -206,7 +286,176 @@ function StudioWorkspaceContent() {
     setPreferredStyle(draft.preferredStyle || 'authoritative');
     if (draft?._id) {
       fetchDraftMedia(draft._id);
+      fetchDraftCarousel(draft._id);
     }
+  };
+
+  // Helper to sync slide into slide edit form
+  const syncSlideToEditor = (slide) => {
+    if (!slide) return;
+    setSlideEditBadge(slide.categoryBadge || 'INSIGHT');
+    setSlideEditHeading(slide.heading || '');
+    setSlideEditSubheading(slide.subheading || '');
+    setSlideEditBody(slide.bodyText || '');
+    setSlideEditBullets(slide.bulletPoints || []);
+    setSlideEditStatValue(slide.statCallout?.value || '');
+    setSlideEditStatLabel(slide.statCallout?.label || '');
+  };
+
+  // Fetch carousel linked to draft
+  const fetchDraftCarousel = async (draftId) => {
+    try {
+      const res = await carouselApi.getByDraft(draftId);
+      if (res?.data && res.data.length > 0) {
+        const carousel = res.data[0];
+        setCurrentCarousel(carousel);
+        setCarouselTheme(carousel.theme || 'modern_navy');
+        setCarouselSlideCount(carousel.slideCount || 6);
+        setCarouselAspectRatio(carousel.aspectRatio || '4:5');
+        if (carousel.slides && carousel.slides.length > 0) {
+          syncSlideToEditor(carousel.slides[0]);
+          setActiveSlideIndex(0);
+        }
+      } else {
+        setCurrentCarousel(null);
+      }
+    } catch (err) {
+      console.warn('Could not load draft carousel:', err.message);
+    }
+  };
+
+  // Carousel Handlers
+  const handleGenerateCarousel = async (countOverride = null, themeOverride = null) => {
+    if (!currentDraft) return;
+    setIsGeneratingCarousel(true);
+    setError('');
+    try {
+      const payload = {
+        draftId: currentDraft._id,
+        slideCount: countOverride || carouselSlideCount,
+        theme: themeOverride || carouselTheme,
+        aspectRatio: carouselAspectRatio
+      };
+      const res = await carouselApi.generate(payload);
+      if (res?.data) {
+        setCurrentCarousel(res.data);
+        setActiveSlideIndex(0);
+        syncSlideToEditor(res.data.slides?.[0]);
+        showToast(`Generated ${res.data.slides?.length}-slide carousel with HTML/CSS architecture!`);
+      }
+    } catch (err) {
+      setError(err.message || 'Carousel generation failed.');
+    } finally {
+      setIsGeneratingCarousel(false);
+    }
+  };
+
+  const handleChangeTheme = async (newTheme) => {
+    setCarouselTheme(newTheme);
+    if (!currentCarousel) return;
+    try {
+      const res = await carouselApi.update(currentCarousel._id, { theme: newTheme });
+      if (res?.data) {
+        setCurrentCarousel(res.data);
+        showToast(`Applied ${CAROUSEL_THEMES.find((t) => t.id === newTheme)?.name || newTheme} theme!`);
+      }
+    } catch (err) {
+      setError(err.message || 'Could not change carousel theme.');
+    }
+  };
+
+  const handleSelectSlide = (index) => {
+    if (!currentCarousel?.slides || index < 0 || index >= currentCarousel.slides.length) return;
+    setActiveSlideIndex(index);
+    syncSlideToEditor(currentCarousel.slides[index]);
+  };
+
+  const handleSaveSlide = async () => {
+    if (!currentCarousel) return;
+    setIsSavingSlide(true);
+    try {
+      const payload = {
+        heading: slideEditHeading,
+        subheading: slideEditSubheading,
+        bodyText: slideEditBody,
+        bulletPoints: slideEditBullets,
+        categoryBadge: slideEditBadge,
+        statCallout: {
+          value: slideEditStatValue,
+          label: slideEditStatLabel
+        }
+      };
+      const res = await carouselApi.updateSlide(currentCarousel._id, activeSlideIndex, payload);
+      if (res?.data) {
+        setCurrentCarousel(res.data);
+        showToast(`Slide ${activeSlideIndex + 1} changes saved!`);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to save slide.');
+    } finally {
+      setIsSavingSlide(false);
+    }
+  };
+
+  const handleRegenerateSlide = async () => {
+    if (!currentCarousel) return;
+    setIsRegeneratingSlide(true);
+    try {
+      const res = await carouselApi.regenerateSlide(currentCarousel._id, activeSlideIndex, {
+        instructions: slideRegenInstructions
+      });
+      if (res?.data?.carousel) {
+        setCurrentCarousel(res.data.carousel);
+        syncSlideToEditor(res.data.slide);
+        setIsSlideRegenModalOpen(false);
+        setSlideRegenInstructions('');
+        showToast(`Regenerated Slide ${activeSlideIndex + 1} with AI!`);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to regenerate slide.');
+    } finally {
+      setIsRegeneratingSlide(false);
+    }
+  };
+
+  const handleRenderCarousel = async () => {
+    if (!currentCarousel) return;
+    setIsRenderingCarousel(true);
+    try {
+      const res = await carouselApi.render(currentCarousel._id);
+      if (res?.data) {
+        setCurrentCarousel(res.data);
+        showToast('All carousel slides rendered to crisp PNGs and uploaded to Cloudinary!');
+      }
+    } catch (err) {
+      setError(err.message || 'Slide rendering failed.');
+    } finally {
+      setIsRenderingCarousel(false);
+    }
+  };
+
+  const handleDownloadSlidePng = (slideIndex) => {
+    if (!currentCarousel) return;
+    const slide = currentCarousel.slides?.[slideIndex];
+    if (slide?.renderedImageUrl) {
+      const link = document.createElement('a');
+      link.href = slide.renderedImageUrl;
+      link.target = '_blank';
+      link.download = `slide-${String(slideIndex + 1).padStart(2, '0')}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } else {
+      const url = carouselApi.getSlidePngUrl(currentCarousel._id, slideIndex);
+      window.open(url, '_blank');
+    }
+  };
+
+  const handleDownloadZip = () => {
+    if (!currentCarousel) return;
+    const url = carouselApi.getZipUrl(currentCarousel._id);
+    window.open(url, '_blank');
+    showToast('Exporting high-res carousel ZIP package...');
   };
 
   // Fetch media assets linked to current draft
@@ -947,7 +1196,72 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
           ) : (
             /* Active Post Studio Workspace */
             <div className="space-y-6">
-              {/* Version History Selector Tabs (Part D) */}
+              {/* Primary Content Studio Format Mode Switcher */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setActiveStudioTab('post')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                      activeStudioTab === 'post'
+                        ? 'bg-slate-900 text-white shadow-xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span>📝</span>
+                    <span>Single Post & Visual</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveStudioTab('carousel');
+                      if (!currentCarousel && currentDraft) {
+                        handleGenerateCarousel();
+                      }
+                    }}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                      activeStudioTab === 'carousel'
+                        ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs'
+                        : 'bg-blue-50 text-blue-700 hover:bg-blue-100'
+                    }`}
+                  >
+                    <span>📑</span>
+                    <span>AI LinkedIn Carousel ({currentCarousel?.slides?.length || 6} Slides)</span>
+                    {currentCarousel?.isRendered && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[9px] bg-emerald-500 text-white font-bold">
+                        PNGs Ready
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                {activeStudioTab === 'carousel' && currentCarousel && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleRenderCarousel}
+                      disabled={isRenderingCarousel}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    >
+                      <span>{isRenderingCarousel ? '⏳' : '🎨'}</span>
+                      <span>{isRenderingCarousel ? 'Rendering PNGs...' : 'Render High-Res PNGs'}</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleDownloadZip}
+                      className="px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-xs flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>📦</span>
+                      <span>Download All (ZIP)</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {activeStudioTab === 'post' ? (
+                /* Post & Visual Graphic Workspace */
+                <div className="space-y-6">
+                  {/* Version History Selector Tabs (Part D) */}
               <div className="bg-white border border-slate-200/80 rounded-2xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
                   <span>Draft History:</span>
@@ -1700,9 +2014,622 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                 )}
               </div>
             </div>
+          ) : (
+            /* Carousel Studio Workspace */
+            <div className="space-y-6">
+              {/* Carousel Top Controls Card */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-5">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-base">📑</span>
+                      <h3 className="text-sm font-bold text-slate-900">
+                        {currentCarousel?.title || 'AI LinkedIn Carousel Studio'}
+                      </h3>
+                      {currentCarousel?.isRendered ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                          ✓ High-Res PNGs Rendered (Cloudinary)
+                        </span>
+                      ) : currentCarousel ? (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800">
+                          HTML/CSS Preview Ready
+                        </span>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Rendered using modular HTML/CSS templates for crisp typography, zero AI text artifacts, and mobile readability.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    {!currentCarousel ? (
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateCarousel()}
+                        disabled={isGeneratingCarousel}
+                        className="px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md cursor-pointer flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <span>{isGeneratingCarousel ? '⏳' : '⚡'}</span>
+                        <span>{isGeneratingCarousel ? 'Synthesizing Slides...' : 'Generate 6-Slide Carousel'}</span>
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleGenerateCarousel()}
+                          disabled={isGeneratingCarousel}
+                          className="px-3.5 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold cursor-pointer transition-colors"
+                        >
+                          {isGeneratingCarousel ? 'Regenerating...' : '🔄 Regenerate All Slides'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleRenderCarousel}
+                          disabled={isRenderingCarousel}
+                          className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                        >
+                          <span>{isRenderingCarousel ? '⏳' : '🎨'}</span>
+                          <span>{isRenderingCarousel ? 'Rendering PNGs...' : 'Render High-Res PNGs'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleDownloadZip}
+                          className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+                        >
+                          <span>📦</span>
+                          <span>Download ZIP</span>
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {currentCarousel && (
+                  <div className="space-y-4">
+                    {/* Theme Selector Swatches */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Brand Editorial Theme
+                      </label>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2">
+                        {CAROUSEL_THEMES.map((th) => {
+                          const isSelected = (currentCarousel?.theme || carouselTheme) === th.id;
+                          return (
+                            <button
+                              key={th.id}
+                              type="button"
+                              onClick={() => handleChangeTheme(th.id)}
+                              className={`p-2.5 rounded-xl border-2 text-left transition-all cursor-pointer flex flex-col gap-1.5 ${
+                                isSelected
+                                  ? 'border-blue-600 ring-2 ring-blue-600/20 shadow-xs'
+                                  : 'border-slate-200 hover:border-slate-300 bg-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className="w-4 h-4 rounded-full border border-black/10 shrink-0"
+                                  style={{ backgroundColor: th.bg }}
+                                />
+                                <span
+                                  className="w-3 h-3 rounded-full shrink-0"
+                                  style={{ backgroundColor: th.accent }}
+                                />
+                              </div>
+                              <span className="text-[11px] font-bold text-slate-800 truncate block">
+                                {th.name}
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Slide Count & Aspect Ratio */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-2 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-700">Slide Count:</span>
+                        {[5, 6, 7].map((num) => (
+                          <button
+                            key={num}
+                            type="button"
+                            onClick={() => handleGenerateCarousel(num)}
+                            disabled={isGeneratingCarousel}
+                            className={`px-2.5 py-1 rounded-lg font-bold cursor-pointer transition-colors ${
+                              (currentCarousel?.slideCount || carouselSlideCount) === num
+                                ? 'bg-slate-900 text-white'
+                                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                            }`}
+                          >
+                            {num} Slides
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-700">Format:</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold">
+                          4:5 Portrait (1080×1350)
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!currentCarousel ? (
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-12 text-center shadow-xs space-y-4">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mx-auto text-2xl">
+                    📑
+                  </div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    No Carousel Created for this Post Yet
+                  </h3>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+                    Click "Generate 6-Slide Carousel" above to distill this approved post and research document into a high-engagement 5-7 slide visual deck.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateCarousel()}
+                    disabled={isGeneratingCarousel}
+                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer inline-flex items-center gap-2"
+                  >
+                    <span>{isGeneratingCarousel ? '⏳' : '⚡'}</span>
+                    <span>Generate Carousel Now</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Main Interactive Slide Canvas & Inspector */}
+                  <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                    {/* LEFT: Live Interactive Slide Viewport (7 cols) */}
+                    <div className="lg:col-span-7 space-y-4">
+                      {/* Slide Navigation Header */}
+                      <div className="flex items-center justify-between bg-white border border-slate-200 rounded-xl p-3 shadow-2xs">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectSlide(Math.max(0, activeSlideIndex - 1))}
+                          disabled={activeSlideIndex === 0}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                        >
+                          ← Prev Slide
+                        </button>
+
+                        <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                          <span>Slide</span>
+                          <span className="px-2 py-0.5 rounded-md bg-blue-100 text-blue-800">
+                            {activeSlideIndex + 1} / {currentCarousel.slides?.length || 6}
+                          </span>
+                          <span className="text-slate-400 font-normal">
+                            ({currentCarousel.slides?.[activeSlideIndex]?.slideType?.replace('_', ' ') || 'content'})
+                          </span>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleSelectSlide(
+                              Math.min((currentCarousel.slides?.length || 6) - 1, activeSlideIndex + 1)
+                            )
+                          }
+                          disabled={activeSlideIndex === (currentCarousel.slides?.length || 6) - 1}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-30 cursor-pointer"
+                        >
+                          Next Slide →
+                        </button>
+                      </div>
+
+                      {/* Live Interactive Slide Canvas Container (Scaled 4:5 preview) */}
+                      <div className="rounded-2xl overflow-hidden border border-slate-200 shadow-md relative bg-slate-950">
+                        {(() => {
+                          const slide = currentCarousel.slides?.[activeSlideIndex];
+                          const activeTheme =
+                            CAROUSEL_THEMES.find((t) => t.id === currentCarousel.theme) ||
+                            CAROUSEL_THEMES[0];
+                          const total = currentCarousel.slides?.length || 6;
+                          const pct = Math.round(((activeSlideIndex + 1) / total) * 100);
+
+                          if (!slide) return null;
+
+                          return (
+                            <div
+                              className="w-full aspect-[4/5] p-8 sm:p-10 flex flex-col justify-between relative overflow-hidden select-none transition-colors duration-200"
+                              style={{ backgroundColor: activeTheme.bg, color: activeTheme.text }}
+                            >
+                              {/* Top Progress Line */}
+                              <div className="absolute top-0 inset-x-0 h-1.5 bg-white/10">
+                                <div
+                                  className="h-full transition-all duration-300"
+                                  style={{ width: `${pct}%`, backgroundColor: activeTheme.accent }}
+                                />
+                              </div>
+
+                              {/* Header */}
+                              <div className="flex items-center justify-between">
+                                <div
+                                  className="px-3 py-1 rounded-full text-[10px] sm:text-xs font-extrabold tracking-wider uppercase border flex items-center gap-1.5"
+                                  style={{
+                                    backgroundColor: activeTheme.cardBg,
+                                    borderColor: `${activeTheme.accent}40`,
+                                    color: activeTheme.accent
+                                  }}
+                                >
+                                  <span>⚡</span>
+                                  <span>{slide.categoryBadge || 'INSIGHT'}</span>
+                                </div>
+                                <div
+                                  className="text-xs sm:text-sm font-bold tracking-wider"
+                                  style={{ color: activeTheme.secondary }}
+                                >
+                                  {String(activeSlideIndex + 1).padStart(2, '0')} /{' '}
+                                  {String(total).padStart(2, '0')}
+                                </div>
+                              </div>
+
+                              {/* Body */}
+                              <div className="flex-1 flex flex-col justify-center gap-4 my-4">
+                                {slide.slideType === 'hook_intro' ? (
+                                  <>
+                                    <h2 className="text-2xl sm:text-3xl font-extrabold leading-tight tracking-tight">
+                                      {slide.heading}
+                                    </h2>
+                                    {slide.subheading && (
+                                      <p
+                                        className="text-sm sm:text-base font-semibold leading-snug"
+                                        style={{ color: activeTheme.accent }}
+                                      >
+                                        {slide.subheading}
+                                      </p>
+                                    )}
+                                    <div
+                                      className="p-4 rounded-xl border shadow-xs space-y-2"
+                                      style={{
+                                        backgroundColor: activeTheme.cardBg,
+                                        borderColor: `${activeTheme.accent}30`
+                                      }}
+                                    >
+                                      <p className="text-xs sm:text-sm leading-relaxed opacity-90">
+                                        {slide.bodyText}
+                                      </p>
+                                      <div
+                                        className="flex items-center gap-1 text-xs font-bold pt-1"
+                                        style={{ color: activeTheme.accent }}
+                                      >
+                                        <span>👉</span>
+                                        <span>Swipe for the full strategic breakdown</span>
+                                      </div>
+                                    </div>
+                                  </>
+                                ) : slide.slideType === 'closing_cta' ? (
+                                  <div className="text-center space-y-4">
+                                    <h2 className="text-2xl sm:text-3xl font-extrabold leading-tight">
+                                      {slide.heading}
+                                    </h2>
+                                    <div
+                                      className="p-5 rounded-xl border space-y-3"
+                                      style={{
+                                        backgroundColor: activeTheme.cardBg,
+                                        borderColor: `${activeTheme.accent}30`
+                                      }}
+                                    >
+                                      <p
+                                        className="text-sm font-bold"
+                                        style={{ color: activeTheme.accent }}
+                                      >
+                                        {slide.subheading || 'What is your perspective on this?'}
+                                      </p>
+                                      <p className="text-xs sm:text-sm leading-relaxed opacity-90">
+                                        {slide.bodyText}
+                                      </p>
+                                      <div
+                                        className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold"
+                                        style={{
+                                          backgroundColor: activeTheme.accent,
+                                          color: activeTheme.bg
+                                        }}
+                                      >
+                                        <span>💬 Join the Discussion</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <>
+                                    <div className="space-y-1">
+                                      <span
+                                        className="text-[10px] font-bold tracking-widest uppercase block"
+                                        style={{ color: activeTheme.secondary }}
+                                      >
+                                        {slide.slideType === 'key_takeaway'
+                                          ? 'KEY TAKEAWAY'
+                                          : `POINT #${activeSlideIndex}`}
+                                      </span>
+                                      <h2 className="text-xl sm:text-2xl font-extrabold leading-snug">
+                                        {slide.heading}
+                                      </h2>
+                                    </div>
+
+                                    {slide.subheading && (
+                                      <p
+                                        className="text-xs sm:text-sm font-semibold"
+                                        style={{ color: activeTheme.accent }}
+                                      >
+                                        {slide.subheading}
+                                      </p>
+                                    )}
+
+                                    {slide.statCallout?.value && (
+                                      <div
+                                        className="flex items-baseline gap-3 p-3 rounded-r-xl border-l-4"
+                                        style={{
+                                          backgroundColor: `${activeTheme.accent}15`,
+                                          borderLeftColor: activeTheme.accent
+                                        }}
+                                      >
+                                        <span
+                                          className="text-2xl sm:text-3xl font-black"
+                                          style={{ color: activeTheme.accent }}
+                                        >
+                                          {slide.statCallout.value}
+                                        </span>
+                                        <span
+                                          className="text-xs font-bold"
+                                          style={{ color: activeTheme.secondary }}
+                                        >
+                                          {slide.statCallout.label}
+                                        </span>
+                                      </div>
+                                    )}
+
+                                    {slide.bodyText && (
+                                      <p className="text-xs sm:text-sm leading-relaxed opacity-90">
+                                        {slide.bodyText}
+                                      </p>
+                                    )}
+
+                                    {slide.bulletPoints?.length > 0 && (
+                                      <div
+                                        className="p-3.5 rounded-xl border space-y-1.5"
+                                        style={{
+                                          backgroundColor: activeTheme.cardBg,
+                                          borderColor: `${activeTheme.accent}30`
+                                        }}
+                                      >
+                                        {slide.bulletPoints.map((bp, bidx) => (
+                                          <div key={bidx} className="flex items-start gap-2 text-xs">
+                                            <span
+                                              className="w-4 h-4 rounded flex items-center justify-center font-bold text-[9px] shrink-0 mt-0.5"
+                                              style={{
+                                                backgroundColor: `${activeTheme.accent}25`,
+                                                color: activeTheme.accent
+                                              }}
+                                            >
+                                              ✓
+                                            </span>
+                                            <span>{bp}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+
+                              {/* Footer */}
+                              <div
+                                className="flex items-center justify-between pt-3 border-t"
+                                style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+                              >
+                                <div className="flex items-center gap-2.5">
+                                  <div
+                                    className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-xs"
+                                    style={{
+                                      backgroundColor: activeTheme.accent,
+                                      color: activeTheme.bg
+                                    }}
+                                  >
+                                    {user?.name?.charAt(0) || 'U'}
+                                  </div>
+                                  <div>
+                                    <p className="text-xs font-bold leading-tight">
+                                      {user?.name || 'Thought Leader'}
+                                    </p>
+                                    <p
+                                      className="text-[10px] leading-tight"
+                                      style={{ color: activeTheme.secondary }}
+                                    >
+                                      {user?.headline || 'Tech Strategist'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div
+                                  className="text-xs font-extrabold tracking-wider uppercase flex items-center gap-1"
+                                  style={{ color: activeTheme.accent }}
+                                >
+                                  {slide.slideType === 'closing_cta' ? 'SAVE & SHARE 🔖' : 'SWIPE ➔'}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* Quick Actions Below Canvas */}
+                      <div className="flex items-center justify-between gap-2 p-2 bg-slate-50 border border-slate-200 rounded-xl">
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadSlidePng(activeSlideIndex)}
+                          className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-100 text-xs font-bold text-slate-700 cursor-pointer flex items-center gap-1.5"
+                        >
+                          <span>⬇️</span>
+                          <span>Download Slide {activeSlideIndex + 1} PNG</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setIsSlideRegenModalOpen(true)}
+                          className="px-3 py-1.5 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold cursor-pointer flex items-center gap-1.5 border border-blue-200"
+                        >
+                          <span>✨</span>
+                          <span>Regenerate Slide {activeSlideIndex + 1} with AI</span>
+                        </button>
+                      </div>
+
+                      {/* Slide Track Thumbnails */}
+                      <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                        {currentCarousel.slides?.map((sl, idx) => (
+                          <button
+                            key={sl._id || idx}
+                            type="button"
+                            onClick={() => handleSelectSlide(idx)}
+                            className={`px-3 py-2 rounded-xl text-left border transition-all cursor-pointer shrink-0 ${
+                              activeSlideIndex === idx
+                                ? 'border-blue-600 bg-blue-50/80 text-blue-900 font-bold ring-2 ring-blue-600/20'
+                                : 'border-slate-200 hover:border-slate-300 bg-white text-slate-700'
+                            }`}
+                          >
+                            <div className="text-[10px] opacity-70 uppercase tracking-wider">
+                              #{idx + 1} {sl.slideType?.replace('_', ' ')}
+                            </div>
+                            <div className="text-xs font-bold truncate max-w-[120px]">
+                              {sl.heading}
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* RIGHT: Slide Content Form Editor (5 cols) */}
+                    <div className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+                      <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">
+                          Edit Slide #{activeSlideIndex + 1} Content
+                        </h4>
+                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-bold uppercase">
+                          {currentCarousel.slides?.[activeSlideIndex]?.slideType || 'content_point'}
+                        </span>
+                      </div>
+
+                      <div className="space-y-3 text-xs">
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Category Badge</label>
+                          <input
+                            type="text"
+                            value={slideEditBadge}
+                            onChange={(e) => setSlideEditBadge(e.target.value)}
+                            className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-xs font-semibold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Heading</label>
+                          <input
+                            type="text"
+                            value={slideEditHeading}
+                            onChange={(e) => setSlideEditHeading(e.target.value)}
+                            className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-xs font-bold"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Subheading</label>
+                          <input
+                            type="text"
+                            value={slideEditSubheading}
+                            onChange={(e) => setSlideEditSubheading(e.target.value)}
+                            className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1">Body Text</label>
+                          <textarea
+                            rows={4}
+                            value={slideEditBody}
+                            onChange={(e) => setSlideEditBody(e.target.value)}
+                            className="w-full p-2.5 rounded-xl border border-slate-200 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-xs leading-relaxed"
+                          />
+                        </div>
+
+                        {/* Stat Callout (value & label) */}
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="font-bold text-slate-700 block mb-1">Stat Value</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. 4.5x or 68%"
+                              value={slideEditStatValue}
+                              onChange={(e) => setSlideEditStatValue(e.target.value)}
+                              className="w-full p-2 rounded-xl border border-slate-200 bg-slate-50 text-xs font-bold"
+                            />
+                          </div>
+                          <div>
+                            <label className="font-bold text-slate-700 block mb-1">Stat Label</label>
+                            <input
+                              type="text"
+                              placeholder="e.g. Lower token cost"
+                              value={slideEditStatLabel}
+                              onChange={(e) => setSlideEditStatLabel(e.target.value)}
+                              className="w-full p-2 rounded-xl border border-slate-200 bg-slate-50 text-xs"
+                            />
+                          </div>
+                        </div>
+
+                        {/* Takeaway Bullets */}
+                        <div className="space-y-1.5">
+                          <label className="font-bold text-slate-700 block">Takeaway Bullets</label>
+                          {slideEditBullets.map((bullet, bidx) => (
+                            <div key={bidx} className="flex items-center gap-1.5">
+                              <input
+                                type="text"
+                                value={bullet}
+                                onChange={(e) => {
+                                  const copy = [...slideEditBullets];
+                                  copy[bidx] = e.target.value;
+                                  setSlideEditBullets(copy);
+                                }}
+                                className="flex-1 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs"
+                              />
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setSlideEditBullets(slideEditBullets.filter((_, i) => i !== bidx))
+                                }
+                                className="p-1 text-red-500 hover:text-red-700 text-xs cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => setSlideEditBullets([...slideEditBullets, 'New key takeaway bullet'])}
+                            className="text-xs font-bold text-blue-600 hover:underline cursor-pointer"
+                          >
+                            + Add Bullet Point
+                          </button>
+                        </div>
+
+                        <div className="pt-2">
+                          <button
+                            type="button"
+                            onClick={handleSaveSlide}
+                            disabled={isSavingSlide}
+                            className="w-full py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer"
+                          >
+                            {isSavingSlide ? 'Saving Slide...' : 'Save Slide Changes'}
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
           )}
         </div>
-      </div>
+      )}
+    </div>
+  </div>
 
       {/* Change Angle Modal */}
       {isAngleModalOpen && (
@@ -1823,6 +2750,53 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                   <span>Generate Graphic Now</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Slide Regeneration Modal */}
+      {isSlideRegenModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+              <h3 className="text-sm font-bold text-slate-900">
+                Regenerate Slide #{activeSlideIndex + 1} with AI
+              </h3>
+              <button
+                type="button"
+                onClick={() => setIsSlideRegenModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 leading-relaxed">
+              Give optional custom instructions to steer the AI synthesis of this specific slide.
+            </p>
+            <textarea
+              rows={3}
+              value={slideRegenInstructions}
+              onChange={(e) => setSlideRegenInstructions(e.target.value)}
+              placeholder="e.g. Focus on operational cost savings and sharpen the takeaway bullets..."
+              className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            />
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setIsSlideRegenModalOpen(false)}
+                className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleRegenerateSlide}
+                disabled={isRegeneratingSlide}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+              >
+                <span>{isRegeneratingSlide ? '⏳' : '✨'}</span>
+                <span>{isRegeneratingSlide ? 'Regenerating...' : 'Regenerate Slide'}</span>
+              </button>
             </div>
           </div>
         </div>

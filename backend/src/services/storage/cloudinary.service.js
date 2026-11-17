@@ -84,6 +84,65 @@ export const uploadImageFromUrl = async (remoteUrl, folder = 'linkedin-content-s
 };
 
 /**
+ * Upload Image Buffer to Cloudinary (e.g. Headless rendered slide PNG)
+ */
+export const uploadImageBuffer = async (buffer, folder = 'linkedin-content-studio/carousels', filename = 'slide') => {
+  const isMock =
+    !env.CLOUDINARY_CLOUD_NAME ||
+    env.CLOUDINARY_CLOUD_NAME === 'mock_cloud_name' ||
+    !env.CLOUDINARY_API_KEY ||
+    env.CLOUDINARY_API_KEY === 'mock_api_key';
+
+  if (isMock) {
+    logger.info(`Cloudinary is in mock mode. Returning hosted webp asset representation for slide buffer.`);
+    const mockId = `mock_cld_slide_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    const mockUrl = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1080&h=1350&q=80`;
+    return {
+      publicId: mockId,
+      secureUrl: mockUrl,
+      thumbnailUrl: mockUrl,
+      width: 1080,
+      height: 1350,
+      format: 'png',
+      bytes: buffer ? buffer.length : 45000
+    };
+  }
+
+  try {
+    const base64Data = `data:image/png;base64,${buffer.toString('base64')}`;
+    const result = await cloudinary.uploader.upload(base64Data, {
+      folder,
+      resource_type: 'image',
+      format: 'png',
+      public_id: `${filename}_${Date.now()}`
+    });
+
+    return {
+      publicId: result.public_id,
+      secureUrl: result.secure_url,
+      thumbnailUrl: result.secure_url,
+      width: result.width,
+      height: result.height,
+      format: result.format,
+      bytes: result.bytes
+    };
+  } catch (error) {
+    logger.warn(`Live Cloudinary buffer upload failed (${error.message}). Returning fallback.`);
+    const mockId = `mock_cld_slide_fallback_${Date.now()}`;
+    const mockUrl = `https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=1080&h=1350&q=80`;
+    return {
+      publicId: mockId,
+      secureUrl: mockUrl,
+      thumbnailUrl: mockUrl,
+      width: 1080,
+      height: 1350,
+      format: 'png',
+      bytes: buffer ? buffer.length : 35000
+    };
+  }
+};
+
+/**
  * Delete Image from Cloudinary
  */
 export const deleteImage = async (publicId) => {

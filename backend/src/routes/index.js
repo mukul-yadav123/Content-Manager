@@ -7,6 +7,7 @@ import newsRoutes from './news.routes.js';
 import studioRoutes from './studio.routes.js';
 import profileRoutes from './profile.routes.js';
 import mediaRoutes from './media.routes.js';
+import carouselRoutes from './carousel.routes.js';
 
 const router = Router();
 
@@ -27,6 +28,9 @@ router.use('/profile', profileRoutes);
 
 // Mount Media & AI Image Generation routes
 router.use('/media', mediaRoutes);
+
+// Mount AI Carousel Generation routes
+router.use('/carousels', carouselRoutes);
 
 // Mount Studio & Content Generation routes
 router.use('/studio', studioRoutes);

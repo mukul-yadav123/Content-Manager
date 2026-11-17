@@ -243,6 +243,11 @@ const contentDraftSchema = new mongoose.Schema(
       type: [carouselSlideSchema],
       default: []
     },
+    carouselId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Carousel',
+      default: null
+    },
     mediaAssets: [
       {
         type: mongoose.Schema.Types.ObjectId,

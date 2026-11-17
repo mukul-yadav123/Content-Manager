@@ -375,6 +375,60 @@ export const mediaApi = {
 };
 
 /**
+ * AI Carousel Endpoints
+ */
+export const carouselApi = {
+  generate: (payload) =>
+    apiRequest('/carousels/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  getById: (id) => apiRequest(`/carousels/${id}`),
+
+  getByDraft: (draftId) => apiRequest(`/carousels/drafts/${draftId}`),
+
+  update: (id, payload) =>
+    apiRequest(`/carousels/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  updateSlide: (id, slideIndex, payload) =>
+    apiRequest(`/carousels/${id}/slides/${slideIndex}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
+
+  regenerateSlide: (id, slideIndex, payload) =>
+    apiRequest(`/carousels/${id}/slides/${slideIndex}/regenerate`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  render: (id) =>
+    apiRequest(`/carousels/${id}/render`, {
+      method: 'POST'
+    }),
+
+  getZipUrl: (id) => {
+    const token = getAuthToken();
+    return `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/carousels/${id}/export/zip${
+      token ? `?token=${encodeURIComponent(token)}` : ''
+    }`;
+  },
+
+  getSlidePngUrl: (id, slideIndex) => {
+    return `${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api'}/carousels/${id}/slides/${slideIndex}/png`;
+  },
+
+  delete: (id) =>
+    apiRequest(`/carousels/${id}`, {
+      method: 'DELETE'
+    })
+};
+
+/**
  * Health check endpoints
  */
 export const healthApi = {
@@ -390,6 +444,7 @@ export default {
   studioApi,
   profileApi,
   mediaApi,
+  carouselApi,
   dashboardApi,
   healthApi,
   getAuthToken,
