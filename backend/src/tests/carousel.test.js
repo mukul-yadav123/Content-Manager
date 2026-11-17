@@ -138,10 +138,10 @@ const runCarouselTests = async () => {
     const isPng = pngBuffer[0] === 0x89 && pngBuffer[1] === 0x50 && pngBuffer[2] === 0x4e && pngBuffer[3] === 0x47;
     assert(isPng, 'Rendered buffer contains authentic PNG signature header');
 
-    // Test Cloudinary Buffer upload
+    // Test Buffer upload
     const uploadRes = await uploadImageBuffer(pngBuffer, 'test/carousels', 'slide_01');
     assert(uploadRes.publicId && uploadRes.publicId.length > 5, 'Uploads slide buffer and returns publicId');
-    assert(uploadRes.secureUrl.startsWith('https://'), 'Uploads slide buffer and returns HTTPS secureUrl');
+    assert(uploadRes.secureUrl.startsWith('http://') || uploadRes.secureUrl.startsWith('https://'), 'Uploads slide buffer and returns valid HTTP(S) secureUrl');
 
     // -------------------------------------------------------------
     // Test Group 4: Carousel API Lifecycle & Isolation
@@ -300,8 +300,8 @@ const runCarouselTests = async () => {
     assert(renderRes.status === 200, 'POST /api/carousels/:id/render returns HTTP 200');
     assert(renderRes.body.data.isRendered === true, 'Marks carousel as isRendered: true');
     assert(renderRes.body.data.status === 'rendered', 'Updates carousel status to "rendered"');
-    assert(renderRes.body.data.slides[0].renderedImageUrl.startsWith('https://'), 'Slide 1 receives Cloudinary secureUrl');
-    assert(renderRes.body.data.slides[5].renderedImageUrl.startsWith('https://'), 'Slide 6 receives Cloudinary secureUrl');
+    assert(renderRes.body.data.slides[0].renderedImageUrl.startsWith('http://') || renderRes.body.data.slides[0].renderedImageUrl.startsWith('https://'), 'Slide 1 receives valid secureUrl');
+    assert(renderRes.body.data.slides[5].renderedImageUrl.startsWith('http://') || renderRes.body.data.slides[5].renderedImageUrl.startsWith('https://'), 'Slide 6 receives valid secureUrl');
 
     // 4.9 Export Single Slide as PNG (GET /api/carousels/:id/slides/:slideIndex/png)
     const pngExportRes = await request(app)

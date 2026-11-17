@@ -38,3 +38,7 @@ Thumbs.db
 coverage/
 .nyc_output/
 
+# Temporary Local Uploads
+uploads/
+backend/uploads/
+

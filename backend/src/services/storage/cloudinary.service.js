@@ -2,6 +2,7 @@ import { cloudinary } from '../../config/cloudinary.js';
 import env from '../../config/env.js';
 import logger from '../../utils/logger.js';
 import ApiError from '../../utils/apiError.js';
+import localStorageService from './localStorage.service.js';
 
 // Clean curated corporate & tech visual fallbacks for offline / mock testing
 const MOCK_VISUAL_FALLBACKS = {
@@ -14,9 +15,15 @@ const MOCK_VISUAL_FALLBACKS = {
 };
 
 /**
- * Upload Image to Cloudinary from remote URL (e.g. OpenAI temporary image URL)
+ * Upload Image from remote URL
+ * Uses local server storage with auto-pruning by default, or Cloudinary if configured
  */
 export const uploadImageFromUrl = async (remoteUrl, folder = 'linkedin-content-studio/posts', style = 'editorial') => {
+  // Use local server storage when STORAGE_DRIVER is 'local' (default)
+  if (env.STORAGE_DRIVER === 'local') {
+    return await localStorageService.uploadImageFromUrl(remoteUrl, folder, style);
+  }
+
   const isMock =
     !env.CLOUDINARY_CLOUD_NAME ||
     env.CLOUDINARY_CLOUD_NAME === 'mock_cloud_name' ||
@@ -84,9 +91,14 @@ export const uploadImageFromUrl = async (remoteUrl, folder = 'linkedin-content-s
 };
 
 /**
- * Upload Image Buffer to Cloudinary (e.g. Headless rendered slide PNG)
+ * Upload Image Buffer (e.g. Headless rendered slide PNG)
  */
 export const uploadImageBuffer = async (buffer, folder = 'linkedin-content-studio/carousels', filename = 'slide') => {
+  // Use local server storage when STORAGE_DRIVER is 'local' (default)
+  if (env.STORAGE_DRIVER === 'local') {
+    return await localStorageService.uploadImageBuffer(buffer, folder, filename);
+  }
+
   const isMock =
     !env.CLOUDINARY_CLOUD_NAME ||
     env.CLOUDINARY_CLOUD_NAME === 'mock_cloud_name' ||
@@ -143,9 +155,13 @@ export const uploadImageBuffer = async (buffer, folder = 'linkedin-content-studi
 };
 
 /**
- * Delete Image from Cloudinary
+ * Delete Image
  */
 export const deleteImage = async (publicId) => {
+  if (env.STORAGE_DRIVER === 'local' || publicId?.startsWith('local_')) {
+    return await localStorageService.deleteImage(publicId);
+  }
+
   if (!publicId || publicId.startsWith('mock_')) {
     logger.info(`Mock Cloudinary asset ${publicId} deleted successfully.`);
     return { result: 'ok' };

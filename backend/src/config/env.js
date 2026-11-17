@@ -28,9 +28,14 @@ const envSchema = z.object({
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
   OPENAI_IMAGE_MODEL: z.string().default('dall-e-3'),
 
-  CLOUDINARY_CLOUD_NAME: z.string().default('mock_cloud_name'),
-  CLOUDINARY_API_KEY: z.string().default('mock_api_key'),
-  CLOUDINARY_API_SECRET: z.string().default('mock_api_secret')
+  // Storage configuration (local server storage with auto-pruning by default)
+  STORAGE_DRIVER: z.enum(['local', 'cloudinary']).default('local'),
+  SERVER_URL: z.string().default('http://localhost:5000'),
+  UPLOAD_RETENTION_HOURS: z.coerce.number().default(48),
+
+  CLOUDINARY_CLOUD_NAME: z.string().optional().default(''),
+  CLOUDINARY_API_KEY: z.string().optional().default(''),
+  CLOUDINARY_API_SECRET: z.string().optional().default('')
 });
 
 const parsedEnv = envSchema.safeParse(process.env);

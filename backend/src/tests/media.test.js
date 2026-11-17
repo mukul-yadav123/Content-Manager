@@ -94,8 +94,8 @@ const runMediaTests = async () => {
       'tech_illustration'
     );
 
-    assert(uploadRes.publicId && uploadRes.publicId.length > 5, 'Upload service returns Cloudinary publicId');
-    assert(uploadRes.secureUrl.startsWith('https://'), 'Upload service returns HTTPS secureUrl');
+    assert(uploadRes.publicId && uploadRes.publicId.length > 5, 'Upload service returns asset publicId');
+    assert(uploadRes.secureUrl.startsWith('http://') || uploadRes.secureUrl.startsWith('https://'), 'Upload service returns valid HTTP(S) secureUrl');
     assert(uploadRes.format === 'webp', 'Upload service specifies webp format');
     assert(uploadRes.width === 1024 && uploadRes.height === 1024, 'Preserves image dimensions (1024x1024)');
 
@@ -185,7 +185,7 @@ const runMediaTests = async () => {
 
     assert(genRes.status === 201, 'POST /api/media/generate returns 201 Created');
     assert(genRes.body.data._id, 'Returns created MediaAsset ID');
-    assert(genRes.body.data.secureUrl.startsWith('https://'), 'Returns Cloudinary secure URL');
+    assert(genRes.body.data.secureUrl.startsWith('http://') || genRes.body.data.secureUrl.startsWith('https://'), 'Returns valid storage secure URL');
     assert(genRes.body.data.imageStyle === 'tech_illustration', 'Stores imageStyle');
     assert(genRes.body.data.isPreferred === true, 'First generated image automatically marked as preferred');
     assert(genRes.body.data.generationModel === 'dall-e-3', 'Records dall-e-3 generation model');
