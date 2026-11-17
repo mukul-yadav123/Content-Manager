@@ -26,7 +26,7 @@ const envSchema = z.object({
 
   OPENAI_API_KEY: z.string().default('mock-key-replace-with-real-key'),
   OPENAI_MODEL: z.string().default('gpt-4o-mini'),
-  OPENAI_IMAGE_MODEL: z.string().default('dall-e-3'),
+  OPENAI_IMAGE_MODEL: z.string().default('gpt-image-1-mini'),
 
   // Storage configuration (local server storage with auto-pruning by default)
   STORAGE_DRIVER: z.enum(['local', 'cloudinary']).default('local'),

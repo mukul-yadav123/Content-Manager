@@ -13,9 +13,9 @@ const UPLOADS_ROOT = path.resolve(__dirname, '../../../uploads');
 const IMAGES_DIR = path.join(UPLOADS_ROOT, 'images');
 const CAROUSELS_DIR = path.join(UPLOADS_ROOT, 'carousels');
 
-// Minimal 1x1 valid PNG binary buffer for mock fallbacks
+// Minimal valid PNG binary buffer for mock fallbacks (neutral dark slate #0f172a, never green)
 const FALLBACK_PNG_BUFFER = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGPgF9f6DwAB2QFQiLRdVgAAAABJRU5ErkJggg==',
   'base64'
 );
 
@@ -108,10 +108,17 @@ export const uploadImageFromUrl = async (
         imageBuffer = Buffer.from(base64Data, 'base64');
       } else {
         logger.info(`Downloading generated image from temporary URL: ${remoteUrl.substring(0, 60)}...`);
-        const response = await fetch(remoteUrl, { signal: AbortSignal.timeout(15000) });
+        const response = await fetch(remoteUrl, {
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          },
+          signal: AbortSignal.timeout(30000)
+        });
         if (response.ok) {
           const arrayBuf = await response.arrayBuffer();
           imageBuffer = Buffer.from(arrayBuf);
+        } else {
+          logger.warn(`Could not fetch remote image URL (HTTP ${response.status} ${response.statusText}). Writing local fallback placeholder.`);
         }
       }
     } catch (fetchErr) {

@@ -60,7 +60,7 @@ export const analyzeSamples = asyncHandler(async (req, res) => {
 
   const updatePayload = {
     profileName: profileName || profile?.profileName || 'Default Voice',
-    tone: analyzedData.toneOfVoice || 'Authoritative yet accessible',
+    tone: (analyzedData.toneOfVoice || 'Authoritative yet accessible').substring(0, 480),
     preferredStyle,
     customInstructions,
     samplePosts: samples,

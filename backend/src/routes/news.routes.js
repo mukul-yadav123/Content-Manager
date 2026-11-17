@@ -11,7 +11,8 @@ import {
   approveNews,
   rejectNews,
   updateNews,
-  deleteNews
+  deleteNews,
+  deleteAllNews
 } from '../controllers/news.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
 import validate from '../middlewares/validate.js';
@@ -48,6 +49,7 @@ router.patch('/:id/reject', validate({ body: rejectNewsSchema }), rejectNews);
 
 // Feed & CRUD Operations
 router.get('/', validate({ query: newsQuerySchema }), getNews);
+router.delete('/', deleteAllNews);
 router.get('/:id', getNewsById);
 router.patch('/:id', validate({ body: updateNewsSchema }), updateNews);
 router.delete('/:id', deleteNews);

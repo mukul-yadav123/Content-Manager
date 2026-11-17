@@ -603,6 +603,26 @@ export const deleteNews = asyncHandler(async (req, res) => {
   );
 });
 
+/**
+ * Delete all news stories for the current user
+ * DELETE /api/news
+ */
+export const deleteAllNews = asyncHandler(async (req, res) => {
+  const filter = { userId: req.user._id };
+  if (req.query.topicId && req.query.topicId !== 'all') {
+    filter.topicId = req.query.topicId;
+  }
+  const result = await NewsArticle.deleteMany(filter);
+  if (req.query.topicId && req.query.topicId !== 'all') {
+    await Topic.findByIdAndUpdate(req.query.topicId, { $set: { articlesCount: 0 } });
+  } else {
+    await Topic.updateMany({ userId: req.user._id }, { $set: { articlesCount: 0 } });
+  }
+  return res.status(200).json(
+    ApiResponse.success({ deletedCount: result.deletedCount }, `Cleared ${result.deletedCount} news stories.`)
+  );
+});
+
 export default {
   discoverNews,
   getNews,
@@ -615,5 +635,6 @@ export default {
   approveNews,
   rejectNews,
   updateNews,
-  deleteNews
+  deleteNews,
+  deleteAllNews
 };

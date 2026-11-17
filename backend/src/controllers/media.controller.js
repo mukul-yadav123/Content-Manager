@@ -17,11 +17,14 @@ import logger from '../utils/logger.js';
 export const generateImage = asyncHandler(async (req, res) => {
   const {
     draftId,
-    style = 'editorial',
+    style,
+    imageStyle,
     customPrompt = '',
     concept = '',
     aspectRatio = '1:1'
   } = req.body;
+
+  const activeStyle = style || imageStyle || 'editorial';
 
   // 1. Verify Draft Ownership
   const draft = await ContentDraft.findOne({
@@ -43,13 +46,13 @@ export const generateImage = asyncHandler(async (req, res) => {
     topic = await Topic.findById(draft.topicId);
   }
 
-  logger.info(`Generating ${style} image for draft "${draft.title}" (User: ${req.user._id})`);
+  logger.info(`Generating ${activeStyle} image for draft "${draft.title}" (User: ${req.user._id})`);
 
   // 3. Generate and Save Media Asset wrapped in GenerationJob lifecycle
   const mediaAsset = await trackGenerationJob({
     userId: req.user._id,
     jobType: 'image-generation',
-    inputParams: { draftId, style, customPrompt, concept, aspectRatio },
+    inputParams: { draftId, style: activeStyle, customPrompt, concept, aspectRatio },
     targetDraftId: draft._id,
     targetArticleId: draft.newsArticleId || null,
     execute: async () => {
@@ -57,7 +60,7 @@ export const generateImage = asyncHandler(async (req, res) => {
         draft,
         article,
         topic,
-        style,
+        style: activeStyle,
         customPrompt,
         concept,
         aspectRatio,
@@ -76,11 +79,14 @@ export const generateImage = asyncHandler(async (req, res) => {
 export const generateVariation = asyncHandler(async (req, res) => {
   const { draftId } = req.params;
   const {
-    style = 'editorial',
+    style,
+    imageStyle,
     customPrompt = '',
     concept = '',
     aspectRatio = '1:1'
   } = req.body;
+
+  const activeStyle = style || imageStyle || 'editorial';
 
   const draft = await ContentDraft.findOne({
     _id: draftId,
@@ -100,13 +106,13 @@ export const generateVariation = asyncHandler(async (req, res) => {
     topic = await Topic.findById(draft.topicId);
   }
 
-  logger.info(`Generating variation (${style}) for draft "${draft.title}"`);
+  logger.info(`Generating variation (${activeStyle}) for draft "${draft.title}"`);
 
   const mediaAsset = await imageGenerationService.generateAndSavePostImage({
     draft,
     article,
     topic,
-    style,
+    style: activeStyle,
     customPrompt,
     concept,
     aspectRatio,
@@ -121,7 +127,8 @@ export const generateVariation = asyncHandler(async (req, res) => {
  * POST /api/media/generate-prompt
  */
 export const generatePromptOnly = asyncHandler(async (req, res) => {
-  const { draftId, style = 'editorial', concept = '' } = req.body;
+  const { draftId, style, imageStyle, concept = '' } = req.body;
+  const activeStyle = style || imageStyle || 'editorial';
 
   const draft = await ContentDraft.findOne({
     _id: draftId,
@@ -145,7 +152,7 @@ export const generatePromptOnly = asyncHandler(async (req, res) => {
     draft,
     article,
     topic,
-    style,
+    style: activeStyle,
     concept
   });
 
@@ -177,6 +184,7 @@ export const getDraftMedia = asyncHandler(async (req, res) => {
     ApiResponse.success(
       {
         items: assets,
+        mediaAssets: assets,
         selectedMediaAssetId: draft.selectedMediaAsset,
         total: assets.length
       },

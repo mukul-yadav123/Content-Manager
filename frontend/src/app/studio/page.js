@@ -284,6 +284,8 @@ function StudioWorkspaceContent() {
     setContentAngle(draft.contentAngle || '');
     setTargetAudience(draft.targetAudience || 'Industry professionals');
     setPreferredStyle(draft.preferredStyle || 'authoritative');
+    setDraftMediaList([]);
+    setSelectedMediaAsset(null);
     if (draft?._id) {
       fetchDraftMedia(draft._id);
       fetchDraftCarousel(draft._id);
@@ -463,10 +465,12 @@ function StudioWorkspaceContent() {
     try {
       const res = await mediaApi.getDraftMedia(draftId);
       if (res?.data) {
-        const assets = res.data.mediaAssets || [];
+        const rawAssets = res.data.items || res.data.mediaAssets || [];
+        const assets = Array.isArray(rawAssets) ? rawAssets.filter((m) => m && m._id) : [];
         setDraftMediaList(assets);
+        const preferredId = res.data.selectedMediaAssetId || res.data.selectedMediaAsset;
         const preferred = assets.find(
-          (m) => m._id === res.data.selectedMediaAssetId || m.isPreferred
+          (m) => m?._id === preferredId || m?.isPreferred
         );
         setSelectedMediaAsset(preferred || assets[0] || null);
       }
@@ -483,19 +487,23 @@ function StudioWorkspaceContent() {
     try {
       const payload = {
         draftId: currentDraft._id,
+        style: selectedImageStyle,
         imageStyle: selectedImageStyle,
         aspectRatio: selectedAspectRatio,
         customPrompt: customPromptOverride || customImagePrompt.trim() || undefined
       };
       const res = await mediaApi.generateImage(payload);
       if (res?.data) {
-        const newAsset = res.data.mediaAsset;
-        setDraftMediaList((prev) => {
-          const filtered = prev.filter((item) => item._id !== newAsset._id);
-          return [newAsset, ...filtered];
-        });
-        setSelectedMediaAsset(newAsset);
-        showToast('Generated professional visual with DALL-E 3 & Cloudinary!');
+        const newAsset = res.data.mediaAsset || res.data;
+        if (newAsset && newAsset._id) {
+          setDraftMediaList((prev) => {
+            const valid = Array.isArray(prev) ? prev.filter((item) => item && item._id) : [];
+            const filtered = valid.filter((item) => item._id !== newAsset._id);
+            return [newAsset, ...filtered];
+          });
+          setSelectedMediaAsset(newAsset);
+          showToast('Generated professional visual with DALL-E 3 & storage!');
+        }
       }
     } catch (err) {
       setError(err.message || 'Image generation failed. Please try again.');
@@ -509,16 +517,23 @@ function StudioWorkspaceContent() {
     setIsGeneratingVariation(true);
     setError('');
     try {
+      const chosenStyle = style || selectedImageStyle;
       const payload = {
-        imageStyle: style || selectedImageStyle,
+        style: chosenStyle,
+        imageStyle: chosenStyle,
         aspectRatio: selectedAspectRatio
       };
       const res = await mediaApi.generateVariation(currentDraft._id, payload);
       if (res?.data) {
-        const newAsset = res.data.mediaAsset;
-        setDraftMediaList((prev) => [newAsset, ...prev]);
-        setSelectedMediaAsset(newAsset);
-        showToast('Created new visual variation!');
+        const newAsset = res.data.mediaAsset || res.data;
+        if (newAsset && newAsset._id) {
+          setDraftMediaList((prev) => {
+            const valid = Array.isArray(prev) ? prev.filter((item) => item && item._id) : [];
+            return [newAsset, ...valid];
+          });
+          setSelectedMediaAsset(newAsset);
+          showToast('Created new visual variation!');
+        }
       }
     } catch (err) {
       setError(err.message || 'Variation generation failed.');
@@ -532,13 +547,16 @@ function StudioWorkspaceContent() {
     try {
       const res = await mediaApi.selectPreferred(assetId);
       if (res?.data) {
+        const updatedAsset = res.data.mediaAsset || res.data;
         setDraftMediaList((prev) =>
-          prev.map((item) => ({
+          (Array.isArray(prev) ? prev.filter((item) => item && item._id) : []).map((item) => ({
             ...item,
             isPreferred: item._id === assetId
           }))
         );
-        setSelectedMediaAsset(res.data.mediaAsset);
+        if (updatedAsset && updatedAsset._id) {
+          setSelectedMediaAsset(updatedAsset);
+        }
         showToast('Selected as primary LinkedIn post visual!');
       }
     } catch (err) {
@@ -552,13 +570,14 @@ function StudioWorkspaceContent() {
     try {
       await mediaApi.delete(assetId);
       setDraftMediaList((prev) => {
-        const updated = prev.filter((item) => item._id !== assetId);
+        const valid = Array.isArray(prev) ? prev.filter((item) => item && item._id) : [];
+        const updated = valid.filter((item) => item._id !== assetId);
         if (selectedMediaAsset?._id === assetId) {
           setSelectedMediaAsset(updated[0] || null);
         }
         return updated;
       });
-      showToast('Image deleted from Cloudinary & storage.');
+      showToast('Image deleted from storage.');
     } catch (err) {
       setError(err.message || 'Failed to delete image.');
     }
@@ -571,6 +590,7 @@ function StudioWorkspaceContent() {
     try {
       const res = await mediaApi.generatePrompt({
         draftId: currentDraft._id,
+        style: selectedImageStyle,
         imageStyle: selectedImageStyle,
         aspectRatio: selectedAspectRatio
       });
@@ -1793,10 +1813,10 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                     <div className="flex items-center gap-2">
                       <span className="text-sm">🎨</span>
                       <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
-                        AI Visual Studio (DALL-E 3 & Cloudinary)
+                        AI Visual Studio (DALL-E 3 & Storage)
                       </h3>
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
-                        {draftMediaList.length} Graphic{draftMediaList.length === 1 ? '' : 's'} Created
+                        {draftMediaList.filter((m) => m && m._id).length} Graphic{draftMediaList.filter((m) => m && m._id).length === 1 ? '' : 's'} Created
                       </span>
                     </div>
                     <p className="text-xs text-slate-500">
@@ -1814,7 +1834,7 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                       <span>🔍</span>
                       <span>{isGeneratingPrompt ? 'Analyzing...' : 'Preview / Edit Prompt'}</span>
                     </button>
-                    {draftMediaList.length > 0 && (
+                    {draftMediaList.filter((m) => m && m._id).length > 0 && (
                       <button
                         type="button"
                         onClick={() => handleGenerateVariation()}
@@ -1906,11 +1926,11 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                 </div>
 
                 {/* 3. Generated Variations Gallery */}
-                {draftMediaList.length > 0 && (
+                {draftMediaList?.filter((m) => m && m._id).length > 0 && (
                   <div className="space-y-3 pt-2">
                     <div className="flex items-center justify-between">
                       <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                        Generated Image Variations ({draftMediaList.length})
+                        Generated Image Variations ({draftMediaList.filter((m) => m && m._id).length})
                       </span>
                       <span className="text-[11px] text-slate-400">
                         Click any variation to inspect or set as preferred LinkedIn visual
@@ -1918,9 +1938,9 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                      {draftMediaList.map((media) => {
-                        const isPreferred = selectedMediaAsset?._id === media._id;
-                        const styleMeta = IMAGE_STYLES.find((s) => s.id === media.imageStyle);
+                      {draftMediaList.filter((m) => m && m._id).map((media) => {
+                        const isPreferred = selectedMediaAsset?._id === media?._id;
+                        const styleMeta = IMAGE_STYLES.find((s) => s.id === media?.imageStyle);
                         return (
                           <div
                             key={media._id}

@@ -188,7 +188,10 @@ const runMediaTests = async () => {
     assert(genRes.body.data.secureUrl.startsWith('http://') || genRes.body.data.secureUrl.startsWith('https://'), 'Returns valid storage secure URL');
     assert(genRes.body.data.imageStyle === 'tech_illustration', 'Stores imageStyle');
     assert(genRes.body.data.isPreferred === true, 'First generated image automatically marked as preferred');
-    assert(genRes.body.data.generationModel === 'dall-e-3', 'Records dall-e-3 generation model');
+    assert(
+      ['dall-e-3', 'gpt-image-1-mini', 'gpt-image-1.5', 'chatgpt-image-latest', 'content-matched-visual'].includes(genRes.body.data.generationModel),
+      'Records supported AI image generation model'
+    );
 
     const firstAssetId = genRes.body.data._id;
 

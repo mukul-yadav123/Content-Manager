@@ -32,7 +32,11 @@ export const searchNewsWithAI = async ({
   freshness = '48h',
   region = 'global'
 }) => {
-  const isMockKey = !env.OPENAI_API_KEY || env.OPENAI_API_KEY === 'mock-key-replace-with-real-key';
+  const isMockKey =
+    !env.OPENAI_API_KEY ||
+    env.OPENAI_API_KEY.includes('mock') ||
+    env.OPENAI_API_KEY.includes('replace') ||
+    process.env.TEST_MOCK_AI === 'true';
 
   if (isMockKey) {
     logger.warn('OpenAI API key is unconfigured or mock. Generating structured web intelligence fallback.');
@@ -75,8 +79,36 @@ export const searchNewsWithAI = async ({
       logger.warn(`OpenAI Responses API fallback: ${responsesApiError.message}. Switching to Chat Completions.`);
     }
 
-    // Fallback to chat completions with structured JSON response if responses API didn't return text
-    if (!rawContent) {
+  // Helper to safely extract and parse JSON from mixed LLM output
+  const extractAndParseJson = (text) => {
+    if (!text || typeof text !== 'string') return null;
+    let clean = text.trim();
+    if (clean.includes('```json')) {
+      clean = clean.split('```json')[1].split('```')[0].trim();
+    } else if (clean.includes('```')) {
+      clean = clean.split('```')[1].split('```')[0].trim();
+    }
+    try {
+      return JSON.parse(clean);
+    } catch {
+      const firstBrace = clean.indexOf('{');
+      const lastBrace = clean.lastIndexOf('}');
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          return JSON.parse(clean.slice(firstBrace, lastBrace + 1));
+        } catch {
+          return null;
+        }
+      }
+      return null;
+    }
+  };
+
+  let parsedData = extractAndParseJson(rawContent);
+
+  // Fallback to chat completions with structured JSON response if responses API didn't return valid JSON
+  if (!parsedData || !Array.isArray(parsedData.articles)) {
+    try {
       logger.debug('Calling client.chat.completions.create with json_object response format...');
       const completion = await client.chat.completions.create({
         model: env.OPENAI_MODEL || 'gpt-4o-mini',
@@ -88,23 +120,17 @@ export const searchNewsWithAI = async ({
         temperature: 0.2
       });
 
-      rawContent = completion.choices?.[0]?.message?.content || '{}';
+      const chatContent = completion.choices?.[0]?.message?.content || '{}';
+      parsedData = extractAndParseJson(chatContent) || JSON.parse(chatContent);
+    } catch (chatError) {
+      logger.warn(`Chat completions fallback also failed: ${chatError.message}`);
     }
+  }
 
-    // Parse and validate the articles returned
-    let parsedData = {};
-    try {
-      // Find JSON block if wrapped in markdown
-      const jsonMatch = rawContent.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        parsedData = JSON.parse(jsonMatch[0]);
-      } else {
-        parsedData = JSON.parse(rawContent);
-      }
-    } catch (parseError) {
-      logger.error(`Failed to parse AI JSON response: ${parseError.message}`);
-      return [];
-    }
+  if (!parsedData || !Array.isArray(parsedData.articles) || parsedData.articles.length === 0) {
+    logger.warn('AI web discovery did not produce verified articles. Using structured fallback.');
+    return generateMockArticles({ topicName, category, keywords });
+  }
 
     const rawArticles = Array.isArray(parsedData.articles) ? parsedData.articles : [];
     const verifiedArticles = [];
@@ -132,6 +158,11 @@ export const searchNewsWithAI = async ({
         relevanceScore: typeof item.relevanceScore === 'number' ? item.relevanceScore : 88,
         discoveryMethod: 'ai_web_search'
       });
+    }
+
+    if (verifiedArticles.length === 0) {
+      logger.warn(`No verified articles extracted from AI response. Falling back to structured topic articles.`);
+      return generateMockArticles({ topicName, category, keywords });
     }
 
     logger.info(`AI web research complete: ${verifiedArticles.length} verified articles extracted.`);

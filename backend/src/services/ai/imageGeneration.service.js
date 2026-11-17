@@ -29,27 +29,52 @@ export const synthesizeImagePrompt = async ({
   const topicName = topic?.name || article?.category || 'Technology';
   const contentAngle = draft?.contentAngle || '';
 
-  // If user provided a specific concept or draft has one, prioritize it
-  const activeConcept = concept || draft?.suggestedImageConcept || '';
+  // Only treat an explicit user-provided concept as an override.
+  // draft.suggestedImageConcept is a rough hint from post generation — use it
+  // as supplementary context for the LLM, NOT as the final concept,
+  // because it was created before the user chose a visual style.
+  const userExplicitConcept = concept || '';
+  const draftHint = draft?.suggestedImageConcept || '';
 
-  if (isMock || activeConcept) {
-    const finalConcept = activeConcept || `A symbolic visual representation of ${headline.replace(/\.$/, '')} focusing on strategic impact and operational execution.`;
+  // Mock / fallback path: no real API key available
+  if (isMock) {
+    const fallbackConcept = userExplicitConcept
+      || `A symbolic visual representation of ${headline.replace(/\.$/, '')} focusing on strategic impact and operational execution.`;
     const promptObj = buildImagePrompt({
-      concept: finalConcept,
+      concept: fallbackConcept,
       headline,
       style,
       aspectRatio: '1:1'
     });
 
     return {
-      concept: finalConcept,
+      concept: fallbackConcept,
       prompt: promptObj.prompt,
       style,
-      altText: `Editorial visual representing ${headline}`,
+      altText: `${IMAGE_STYLE_DESCRIPTIONS[style] ? style.replace(/_/g, ' ') + ' visual' : 'Visual'} for ${headline}`,
       size: promptObj.size
     };
   }
 
+  // If user explicitly provided a complete concept, use it directly
+  if (userExplicitConcept) {
+    const promptObj = buildImagePrompt({
+      concept: userExplicitConcept,
+      headline,
+      style,
+      aspectRatio: '1:1'
+    });
+    return {
+      concept: userExplicitConcept,
+      prompt: promptObj.prompt,
+      style,
+      altText: `${style.replace(/_/g, ' ')} visual for ${headline}`,
+      size: promptObj.size
+    };
+  }
+
+  // LLM-powered concept synthesis: generates a concept that matches the
+  // selected visual style AND the actual post content
   try {
     const openai = getOpenAIClient();
     const promptBlueprint = buildConceptSynthesisPrompt({
@@ -60,11 +85,16 @@ export const synthesizeImagePrompt = async ({
       style
     });
 
+    // Append the draft's suggested concept as a hint (not as the answer)
+    const hintSuffix = draftHint
+      ? `\n\nOptional creative hint from the author (use as inspiration only, adapt to the target style): "${draftHint}"`
+      : '';
+
     const completion = await openai.chat.completions.create({
       model: env.OPENAI_MODEL || 'gpt-4o-mini',
       messages: [
         { role: 'system', content: promptBlueprint.system },
-        { role: 'user', content: promptBlueprint.user }
+        { role: 'user', content: promptBlueprint.user + hintSuffix }
       ],
       response_format: { type: 'json_object' },
       temperature: 0.5
@@ -80,31 +110,32 @@ export const synthesizeImagePrompt = async ({
       concept: synthesizedConcept,
       prompt: detailedPrompt,
       style,
-      altText: parsed.altText || `Graphic illustration for ${headline}`,
+      altText: parsed.altText || `${style.replace(/_/g, ' ')} illustration for ${headline}`,
       size: '1024x1024'
     };
   } catch (err) {
     logger.warn(`Concept synthesis via LLM failed (${err.message}). Using standard prompt builder.`);
-    const fallbackConcept = `A clean, professional visual metaphor representing ${headline}`;
+    // Build a concept from the actual post content and style, not the stale suggestedImageConcept
+    const fallbackConcept = `A clean, professional ${style.replace(/_/g, ' ')} representing ${headline}`;
     const built = buildImagePrompt({ concept: fallbackConcept, headline, style });
     return {
       concept: fallbackConcept,
       prompt: built.prompt,
       style,
-      altText: `Visual for ${headline}`,
+      altText: `${style.replace(/_/g, ' ')} visual for ${headline}`,
       size: built.size
     };
   }
 };
 
 /**
- * Call OpenAI Image API (DALL-E 3) to generate an image
+ * Call OpenAI Image API to generate an image based strictly on post content
  */
 export const generateImageFromOpenAI = async ({
   prompt,
   size = '1024x1024',
   style = 'editorial',
-  model = env.OPENAI_IMAGE_MODEL || 'dall-e-3'
+  model = env.OPENAI_IMAGE_MODEL || 'gpt-image-1-mini'
 }) => {
   const isMock =
     !env.OPENAI_API_KEY ||
@@ -112,45 +143,88 @@ export const generateImageFromOpenAI = async ({
     env.OPENAI_API_KEY.includes('replace');
 
   if (isMock) {
-    logger.info(`OpenAI key is mock or unset. Using curated visual fallback for style "${style}".`);
-    const fallbackUrl = cloudinaryService.MOCK_VISUAL_FALLBACKS[style] || cloudinaryService.MOCK_VISUAL_FALLBACKS.editorial;
+    logger.info(`OpenAI key is mock or unset. Generating content-matched visual for: "${prompt.substring(0, 60)}..."`);
+    const encodedPrompt = encodeURIComponent(prompt.substring(0, 200));
+    const dynamicUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`;
     return {
-      imageUrl: fallbackUrl,
+      imageUrl: dynamicUrl,
       revisedPrompt: prompt
     };
   }
 
-  try {
-    const openai = getOpenAIClient();
-    logger.info(`Requesting image from OpenAI Image API (${model}, size: ${size})...`);
+  // Model cascade: prioritize configured model, fallback to modern project models
+  const candidateModels = [
+    model,
+    'gpt-image-1-mini',
+    'gpt-image-1.5',
+    'chatgpt-image-latest',
+    'dall-e-3'
+  ].filter(Boolean);
+  const uniqueModels = [...new Set(candidateModels)];
 
-    const response = await openai.images.generate({
-      model,
-      prompt,
-      n: 1,
-      size,
-      quality: 'standard'
-    });
+  const openai = getOpenAIClient();
+  let lastError = null;
 
-    const imageUrl = response.data?.[0]?.url;
-    const revisedPrompt = response.data?.[0]?.revised_prompt || prompt;
+  for (const targetModel of uniqueModels) {
+    try {
+      const isDalle = targetModel.startsWith('dall-e');
+      let effectiveSize = size;
+      if (!isDalle && effectiveSize === '1792x1024') {
+        effectiveSize = '1536x1024';
+      }
 
-    if (!imageUrl) {
-      throw new Error('No image URL returned by OpenAI Image API.');
+      logger.info(`Requesting image from OpenAI Image API (${targetModel}, size: ${effectiveSize})...`);
+
+      const generateParams = {
+        model: targetModel,
+        prompt,
+        n: 1,
+        size: effectiveSize
+      };
+
+      if (isDalle) {
+        generateParams.quality = 'standard';
+      } else {
+        generateParams.quality = 'auto';
+      }
+
+      const response = await openai.images.generate(generateParams);
+
+      const item = response.data?.[0];
+      const imageUrl = item?.url || (item?.b64_json ? `data:image/png;base64,${item.b64_json}` : null);
+      const revisedPrompt = item?.revised_prompt || prompt;
+
+      if (!imageUrl) {
+        throw new Error(`No image URL or b64_json returned by OpenAI (${targetModel}).`);
+      }
+
+      logger.info(`Successfully generated content image using OpenAI model: ${targetModel}`);
+      return {
+        imageUrl,
+        revisedPrompt,
+        modelUsed: targetModel
+      };
+    } catch (error) {
+      lastError = error;
+      logger.warn(`OpenAI image generation failed with ${targetModel} (${error.message}).`);
+      // If error is model does not exist or invalid_value, continue to next model in cascade
+      if (error.status === 400 || error.message?.includes('does not exist')) {
+        continue;
+      }
+      break;
     }
-
-    return {
-      imageUrl,
-      revisedPrompt
-    };
-  } catch (error) {
-    logger.warn(`OpenAI image generation failed (${error.message}). Falling back to safe high-quality asset.`);
-    const fallbackUrl = cloudinaryService.MOCK_VISUAL_FALLBACKS[style] || cloudinaryService.MOCK_VISUAL_FALLBACKS.editorial;
-    return {
-      imageUrl: fallbackUrl,
-      revisedPrompt: prompt
-    };
   }
+
+  // Fallback: If OpenAI API models fail, generate dynamic visual matched to the post content
+  logger.warn(`All OpenAI image models failed (${lastError?.message}). Using content-matched visual fallback.`);
+  const encodedPrompt = encodeURIComponent(prompt.substring(0, 200));
+  const dynamicFallbackUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`;
+
+  return {
+    imageUrl: dynamicFallbackUrl,
+    revisedPrompt: prompt,
+    modelUsed: 'content-matched-visual'
+  };
 };
 
 /**
@@ -187,12 +261,27 @@ export const generateAndSavePostImage = async ({
   const dimensions = aspectRatio === '16:9' ? '1792x1024' : '1024x1024';
 
   // 2. Generate Image via OpenAI
-  const { imageUrl, revisedPrompt } = await generateImageFromOpenAI({
+  const { imageUrl, revisedPrompt, modelUsed } = await generateImageFromOpenAI({
     prompt: finalPrompt,
     size: dimensions,
     style,
-    model: env.OPENAI_IMAGE_MODEL || 'dall-e-3'
+    model: env.OPENAI_IMAGE_MODEL || 'gpt-image-1-mini'
   });
+
+  // Update concept and altText to reflect the ACTUAL generated image, not stale draft hints.
+  // If OpenAI returned a revised prompt, use it as the concept since it describes
+  // what was actually generated. Otherwise keep the synthesized concept.
+  if (revisedPrompt && revisedPrompt !== finalPrompt) {
+    // OpenAI revised the prompt; use a shortened version as the concept
+    finalConcept = revisedPrompt.length > 300
+      ? revisedPrompt.substring(0, 297) + '...'
+      : revisedPrompt;
+  }
+  // Update altText to match the actual concept
+  const styleLabel = style.replace(/_/g, ' ');
+  altText = finalConcept
+    ? `${styleLabel} – ${finalConcept.substring(0, 120)}`
+    : `${styleLabel} visual for ${draft.title}`;
 
   // 3. Upload to Cloudinary
   const uploadResult = await cloudinaryService.uploadImageFromUrl(
@@ -214,7 +303,7 @@ export const generateAndSavePostImage = async ({
       thumbnailUrl: uploadResult.thumbnailUrl || uploadResult.secureUrl,
       assetType: 'single-image',
       imageStyle: style,
-      generationModel: env.OPENAI_IMAGE_MODEL || 'dall-e-3',
+      generationModel: modelUsed || env.OPENAI_IMAGE_MODEL || 'gpt-image-1-mini',
       format: uploadResult.format || 'webp',
       width: uploadResult.width || 1024,
       height: uploadResult.height || 1024,

@@ -36,7 +36,11 @@ export const errorHandler = (err, req, res, next) => {
   }
 
   // Log error with Winston
-  logger.error(`${req.method} ${req.originalUrl} - ${error.statusCode} - ${error.message}`);
+  logger.error(
+    `${req.method} ${req.originalUrl} - ${error.statusCode} - ${error.message}${
+      error.errors?.length ? ` : ${JSON.stringify(error.errors)}` : ''
+    }`
+  );
   if (error.statusCode === 500 && error.stack) {
     logger.error(error.stack);
   }

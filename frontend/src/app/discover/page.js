@@ -35,6 +35,7 @@ export default function DiscoverNewsPage() {
   const [selectedSort, setSelectedSort] = useState('score');
   const [minScore, setMinScore] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [hasSearched, setHasSearched] = useState(false);
 
   // Modals & Action States
   const [isDiscoverModalOpen, setIsDiscoverModalOpen] = useState(false);
@@ -92,13 +93,21 @@ export default function DiscoverNewsPage() {
     searchTerm
   ]);
 
+  const handleExecuteSearch = () => {
+    setHasSearched(true);
+    fetchNews();
+  };
+
   useEffect(() => {
     fetchTopics();
   }, [fetchTopics]);
 
+  // If user has already clicked search, re-fetch when dropdown filters change
   useEffect(() => {
-    fetchNews();
-  }, [fetchNews]);
+    if (hasSearched) {
+      fetchNews();
+    }
+  }, [selectedTopic, selectedFreshness, selectedPublisher, selectedStatus, selectedSort, minScore]);
 
   const showToast = (msg) => {
     setToast(msg);
@@ -111,6 +120,7 @@ export default function DiscoverNewsPage() {
     try {
       const res = await newsApi.discover({ topicId, mode, customRssUrl });
       showToast(res.message || 'Discovery complete!');
+      setHasSearched(true);
       fetchNews();
     } catch (err) {
       setError(err.message || 'News discovery failed.');
@@ -209,9 +219,32 @@ export default function DiscoverNewsPage() {
     }
   };
 
+  // Clear all stories for topic/user
+  const handleClearAllStories = async () => {
+    if (!confirm('Are you sure you want to delete all news stories from your feed?')) return;
+    try {
+      await newsApi.deleteAll({ topicId: selectedTopic !== 'all' ? selectedTopic : undefined });
+      setArticles([]);
+      showToast('All news stories removed from database.');
+    } catch (err) {
+      setError(err.message || 'Failed to clear stories.');
+    }
+  };
+
   // Header Actions
   const headerActions = (
     <div className="flex items-center gap-2">
+      {/* Clear All Stories Button */}
+      {articles.length > 0 && (
+        <button
+          onClick={handleClearAllStories}
+          title="Delete all displayed stories from the database"
+          className="px-3 py-1.5 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 text-xs font-semibold transition-colors cursor-pointer"
+        >
+          Clear All Stories
+        </button>
+      )}
+
       {/* Batch Evaluate Button */}
       <button
         onClick={handleBatchEvaluate}
@@ -328,10 +361,42 @@ export default function DiscoverNewsPage() {
         onMinScoreChange={setMinScore}
         searchTerm={searchTerm}
         onSearchChange={setSearchTerm}
+        onSearch={handleExecuteSearch}
       />
 
-      {/* Loading Skeletons */}
-      {loading ? (
+      {/* State before user clicks Search */}
+      {!hasSearched ? (
+        <div className="bg-white border border-slate-200/80 rounded-2xl p-12 text-center shadow-xs space-y-4">
+          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+            <svg className="w-7 h-7" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-slate-900">Search Discovered News Stories</h3>
+            <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
+              Select your topic or keywords above, then click the Search button to view matching stories. News will only be loaded when you click Search.
+            </p>
+          </div>
+          <div className="pt-2 flex justify-center gap-3">
+            <button
+              onClick={handleExecuteSearch}
+              className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs shadow-xs transition-colors cursor-pointer inline-flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <span>Search News</span>
+            </button>
+            <button
+              onClick={() => setIsDiscoverModalOpen(true)}
+              className="px-4 py-2.5 rounded-xl border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-xs shadow-xs transition-colors cursor-pointer"
+            >
+              Discover More Online
+            </button>
+          </div>
+        </div>
+      ) : loading ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="bg-white border border-slate-200/80 rounded-xl p-5 shadow-xs animate-pulse space-y-3">

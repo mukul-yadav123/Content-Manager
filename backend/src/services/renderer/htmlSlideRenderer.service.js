@@ -440,9 +440,9 @@ export const buildSlideHtml = (slide, carousel, author = {}) => {
 </html>`;
 };
 
-// Valid minimal 1x1 PNG binary fallback buffer (valid PNG magic signature & IHDR)
+// Valid minimal PNG binary fallback buffer (neutral dark slate #0f172a, never green)
 const FALLBACK_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGPgF9f6DwAB2QFQiLRdVgAAAABJRU5ErkJggg==';
 
 export const getFallbackPngBuffer = () => Buffer.from(FALLBACK_PNG_BASE64, 'base64');
 

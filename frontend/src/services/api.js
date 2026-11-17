@@ -221,7 +221,16 @@ export const newsApi = {
   delete: (id) =>
     apiRequest(`/news/${id}`, {
       method: 'DELETE'
-    })
+    }),
+
+  deleteAll: (params = {}) => {
+    const query = new URLSearchParams();
+    if (params.topicId && params.topicId !== 'all') query.set('topicId', params.topicId);
+    const qs = query.toString();
+    return apiRequest(`/news${qs ? `?${qs}` : ''}`, {
+      method: 'DELETE'
+    });
+  }
 };
 
 /**

@@ -75,7 +75,7 @@ const writingProfileSchema = new mongoose.Schema(
     tone: {
       type: String,
       default: 'Authoritative yet accessible, conversational, punchy',
-      maxlength: [200, 'Tone description cannot exceed 200 characters']
+      maxlength: [500, 'Tone description cannot exceed 500 characters']
     },
     targetAudience: {
       type: String,
