@@ -14,6 +14,10 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   CLIENT_URL: z.string().default('http://localhost:3000'),
 
+  JWT_SECRET: z.string().default('linkedin-content-studio-super-secret-jwt-key-2026'),
+  JWT_EXPIRES_IN: z.string().default('7d'),
+  COOKIE_SECRET: z.string().default('linkedin-content-studio-cookie-secret'),
+
   MONGO_URI: z.string().default('mongodb://localhost:27017/linkedin_content_studio'),
 
   REDIS_HOST: z.string().default('127.0.0.1'),

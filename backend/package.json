@@ -6,24 +6,36 @@
   "main": "src/server.js",
   "scripts": {
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "test:auth": "node src/tests/auth.test.js",
+    "test:models": "node src/tests/models.test.js",
+    "test:topics": "node src/tests/topics.test.js",
+    "test:news": "node src/tests/news.test.js",
+    "test:ranking": "node src/tests/ranking.test.js",
+    "test:research": "node src/tests/research.test.js",
+    "test": "node src/tests/models.test.js && node src/tests/auth.test.js && node src/tests/topics.test.js && node src/tests/news.test.js && node src/tests/ranking.test.js && node src/tests/research.test.js"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "bullmq": "^5.41.6",
     "cloudinary": "^2.5.1",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "helmet": "^8.0.0",
     "ioredis": "^5.6.0",
+    "jsonwebtoken": "^9.0.3",
     "mongoose": "^8.12.1",
     "morgan": "^1.10.0",
     "openai": "^4.86.1",
+    "rss-parser": "^3.13.0",
     "winston": "^3.17.0",
     "zod": "^3.24.2"
   },
   "devDependencies": {
-    "nodemon": "^3.1.9"
+    "mongodb-memory-server": "^11.3.0",
+    "nodemon": "^3.1.9",
+    "supertest": "^7.3.2"
   }
 }
-
