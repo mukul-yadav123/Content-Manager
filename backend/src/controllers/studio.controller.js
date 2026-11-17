@@ -1,7 +1,10 @@
 import ContentDraft from '../models/ContentDraft.js';
 import NewsArticle from '../models/NewsArticle.js';
 import Topic from '../models/Topic.js';
+import WritingProfile from '../models/WritingProfile.js';
 import postGenerationService from '../services/ai/postGeneration.service.js';
+import humanizationService from '../services/ai/humanization.service.js';
+import editLearningService from '../services/ai/editLearning.service.js';
 import ApiResponse from '../utils/apiResponse.js';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -67,6 +70,26 @@ export const generatePosts = asyncHandler(async (req, res) => {
   const characterCount = fullText.length;
   const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
 
+  const initialDraftPayload = {
+    hook: initialHook,
+    body: initialBody,
+    cta: initialCta,
+    hashtags: initialTags
+  };
+
+  const initialVersion = {
+    versionId: `ver-initial-${Date.now()}`,
+    versionType: 'initial',
+    title: defaultVar.headline || article.title,
+    hook: initialHook,
+    body: initialBody,
+    cta: initialCta,
+    hashtags: initialTags,
+    humanizationMode: 'none',
+    createdAt: new Date(),
+    note: `Initial AI generation (${defaultVar.approachLabel || defaultVar.approach})`
+  };
+
   // 6. Create ContentDraft document
   const draft = await ContentDraft.create({
     userId: req.user._id,
@@ -85,12 +108,8 @@ export const generatePosts = asyncHandler(async (req, res) => {
     contentAngle,
     preferredStyle,
     isHumanized: false,
-    initialDraft: {
-      hook: initialHook,
-      body: initialBody,
-      cta: initialCta,
-      hashtags: initialTags
-    },
+    initialDraft: initialDraftPayload,
+    versions: [initialVersion],
     keyTakeaways: defaultVar.keyTakeaways || [],
     closingQuestion: defaultVar.closingQuestion || '',
     sourceAttribution: defaultVar.sourceAttribution || '',
@@ -156,7 +175,7 @@ export const getDrafts = asyncHandler(async (req, res) => {
 });
 
 /**
- * Get single draft by ID with all 3 variations
+ * Get single draft by ID with all 3 variations and version snapshots
  * GET /api/studio/drafts/:id
  */
 export const getDraftById = asyncHandler(async (req, res) => {
@@ -420,6 +439,233 @@ export const changeAngle = asyncHandler(async (req, res) => {
 });
 
 /**
+ * Humanize a draft using personal writing profile and selected intensity mode
+ * POST /api/studio/drafts/:id/humanize
+ */
+export const humanizePost = asyncHandler(async (req, res) => {
+  const { mode = 'professional', writingProfileId, tone, contentAngle } = req.body;
+
+  const draft = await ContentDraft.findOne({
+    _id: req.params.id,
+    userId: req.user._id
+  });
+
+  if (!draft) {
+    throw ApiError.notFound('Draft not found');
+  }
+
+  // Fetch target writing profile
+  let profile = null;
+  if (writingProfileId) {
+    profile = await WritingProfile.findOne({ _id: writingProfileId, userId: req.user._id });
+  }
+  if (!profile) {
+    profile = await WritingProfile.findOne({ userId: req.user._id, isDefault: true });
+    if (!profile) {
+      profile = await WritingProfile.findOne({ userId: req.user._id });
+    }
+  }
+
+  // Fetch article with research
+  const article = await NewsArticle.findById(draft.newsArticleId);
+
+  // Execute humanization service
+  const { humanizedPost, qualityEvaluation } = await humanizationService.humanizeDraft({
+    rawDraft: {
+      hook: draft.hook,
+      body: draft.body,
+      cta: draft.cta,
+      hashtags: draft.hashtags
+    },
+    originalResearch: article?.deepResearch,
+    writingProfile: profile,
+    mode,
+    tone: tone || draft.preferredStyle,
+    contentAngle: contentAngle || draft.contentAngle
+  });
+
+  // Store in humanizedDraft subdocument
+  draft.humanizedDraft = {
+    hook: humanizedPost.hook,
+    body: humanizedPost.body,
+    cta: humanizedPost.cta,
+    hashtags: humanizedPost.hashtags,
+    mode,
+    humanizedAt: new Date()
+  };
+
+  draft.isHumanized = true;
+  draft.humanizationMode = mode;
+  draft.qualityEvaluation = qualityEvaluation;
+
+  // Update primary active post fields to humanized version
+  draft.hook = humanizedPost.hook;
+  draft.body = humanizedPost.body;
+  draft.cta = humanizedPost.cta;
+  draft.hashtags = humanizedPost.hashtags;
+
+  // Push new version to maintain complete history
+  const versionId = `ver-human-${Date.now()}`;
+  draft.versions.push({
+    versionId,
+    versionType: 'humanized',
+    title: draft.title,
+    hook: humanizedPost.hook,
+    body: humanizedPost.body,
+    cta: humanizedPost.cta,
+    hashtags: humanizedPost.hashtags,
+    humanizationMode: mode,
+    qualityEvaluation,
+    createdAt: new Date(),
+    note: `Humanized post (${mode} mode)`
+  });
+
+  const fullText = `${draft.hook}\n\n${draft.body}\n\n${draft.cta}`;
+  draft.characterCount = fullText.length;
+  draft.wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
+
+  await draft.save();
+
+  return res.status(200).json(
+    ApiResponse.success(
+      {
+        draft,
+        humanizedPost,
+        qualityEvaluation,
+        versionId
+      },
+      `Draft humanized successfully (${mode} mode)`
+    )
+  );
+});
+
+/**
+ * Approve draft and learn from creator edit patterns
+ * POST /api/studio/drafts/:id/approve
+ */
+export const approveDraft = asyncHandler(async (req, res) => {
+  const draft = await ContentDraft.findOne({
+    _id: req.params.id,
+    userId: req.user._id
+  });
+
+  if (!draft) {
+    throw ApiError.notFound('Draft not found');
+  }
+
+  // Set final approved draft
+  draft.finalApprovedDraft = {
+    hook: draft.hook,
+    body: draft.body,
+    cta: draft.cta,
+    hashtags: draft.hashtags,
+    approvedAt: new Date()
+  };
+  draft.status = 'ready';
+
+  // Push version
+  draft.versions.push({
+    versionId: `ver-approved-${Date.now()}`,
+    versionType: 'final_approved',
+    title: draft.title,
+    hook: draft.hook,
+    body: draft.body,
+    cta: draft.cta,
+    hashtags: draft.hashtags,
+    createdAt: new Date(),
+    note: 'Final approved post'
+  });
+
+  await draft.save();
+
+  // Trigger non-destructive edit learning
+  let newSuggestions = [];
+  try {
+    const profile = await WritingProfile.findOne({ userId: req.user._id, isDefault: true });
+    if (profile) {
+      newSuggestions = await editLearningService.synthesizeSuggestionsFromEdits({
+        currentDraft: draft,
+        profile
+      });
+    }
+  } catch (err) {
+    logger.warn(`Could not synthesize edit suggestions: ${err.message}`);
+  }
+
+  return res.status(200).json(
+    ApiResponse.success(
+      {
+        draft,
+        newSuggestions
+      },
+      'Draft approved and marked ready for publishing'
+    )
+  );
+});
+
+/**
+ * Revert draft fields to a previous version
+ * PATCH /api/studio/drafts/:id/revert-version
+ */
+export const revertVersion = asyncHandler(async (req, res) => {
+  const { versionType, versionId } = req.body;
+
+  const draft = await ContentDraft.findOne({
+    _id: req.params.id,
+    userId: req.user._id
+  });
+
+  if (!draft) {
+    throw ApiError.notFound('Draft not found');
+  }
+
+  let targetVersion = null;
+
+  if (versionId) {
+    targetVersion = draft.versions.find((v) => v.versionId === versionId);
+  }
+
+  if (!targetVersion && versionType) {
+    if (versionType === 'initial' && draft.initialDraft?.body) {
+      targetVersion = draft.initialDraft;
+    } else if (versionType === 'humanized' && draft.humanizedDraft?.body) {
+      targetVersion = draft.humanizedDraft;
+    } else if (versionType === 'user_edited' && draft.userEditedDraft?.body) {
+      targetVersion = draft.userEditedDraft;
+    } else if (versionType === 'final_approved' && draft.finalApprovedDraft?.body) {
+      targetVersion = draft.finalApprovedDraft;
+    } else {
+      // Find latest version matching versionType from versions array
+      const matching = draft.versions.filter((v) => v.versionType === versionType);
+      targetVersion = matching[matching.length - 1];
+    }
+  }
+
+  if (!targetVersion || !targetVersion.body) {
+    throw ApiError.notFound(`Version for "${versionType || versionId}" not found`);
+  }
+
+  // Restore fields
+  draft.hook = targetVersion.hook;
+  draft.body = targetVersion.body;
+  draft.cta = targetVersion.cta || draft.cta;
+  draft.hashtags = targetVersion.hashtags || draft.hashtags;
+
+  const fullText = `${draft.hook}\n\n${draft.body}\n\n${draft.cta || ''}`;
+  draft.characterCount = fullText.length;
+  draft.wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
+
+  await draft.save();
+
+  return res.status(200).json(
+    ApiResponse.success(
+      draft,
+      `Reverted post to ${versionType || 'selected'} version`
+    )
+  );
+});
+
+/**
  * Update draft manual edits
  * PUT /api/studio/drafts/:id
  */
@@ -435,14 +681,36 @@ export const updateDraft = asyncHandler(async (req, res) => {
     throw ApiError.notFound('Draft not found');
   }
 
+  const isContentChanged = (hook && hook !== draft.hook) || (body && body !== draft.body);
+
   // Record revision if hook or body changed
-  if ((hook && hook !== draft.hook) || (body && body !== draft.body)) {
+  if (isContentChanged) {
     draft.revisionHistory.push({
       hook: draft.hook,
       body: draft.body,
       cta: draft.cta,
       editedAt: new Date(),
       note: 'Manual edit'
+    });
+
+    draft.userEditedDraft = {
+      hook: hook || draft.hook,
+      body: body || draft.body,
+      cta: cta !== undefined ? cta : draft.cta,
+      hashtags: hashtags !== undefined ? hashtags : draft.hashtags,
+      editedAt: new Date()
+    };
+
+    draft.versions.push({
+      versionId: `ver-user-${Date.now()}`,
+      versionType: 'user_edited',
+      title: title || draft.title,
+      hook: hook || draft.hook,
+      body: body || draft.body,
+      cta: cta !== undefined ? cta : draft.cta,
+      hashtags: hashtags !== undefined ? hashtags : draft.hashtags,
+      createdAt: new Date(),
+      note: 'User manual edit'
     });
   }
 
@@ -494,6 +762,9 @@ export default {
   regenerateHooks,
   regeneratePost,
   changeAngle,
+  humanizePost,
+  approveDraft,
+  revertVersion,
   updateDraft,
   deleteDraft
 };

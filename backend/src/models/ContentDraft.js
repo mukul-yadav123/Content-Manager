@@ -47,6 +47,49 @@ const postVariationSchema = new mongoose.Schema(
   { _id: true }
 );
 
+// Schema for Humanization Quality Evaluation
+const qualityEvaluationSchema = new mongoose.Schema(
+  {
+    naturalnessScore: { type: Number, min: 0, max: 100, default: 0 },
+    profileConsistencyScore: { type: Number, min: 0, max: 100, default: 0 },
+    clarityScore: { type: Number, min: 0, max: 100, default: 0 },
+    engagementPotentialScore: { type: Number, min: 0, max: 100, default: 0 },
+    relevanceScore: { type: Number, min: 0, max: 100, default: 0 },
+    factualConsistencyScore: { type: Number, min: 0, max: 100, default: 0 },
+    genericFillerDetected: { type: [String], default: [] },
+    overallQualityScore: { type: Number, min: 0, max: 100, default: 0 },
+    feedbackNotes: { type: String, default: '' },
+    evaluatedAt: { type: Date, default: Date.now }
+  },
+  { _id: false }
+);
+
+// Schema for Immutable Version History (Initial AI, Humanized, User-Edited, Final Approved)
+const draftVersionSchema = new mongoose.Schema(
+  {
+    versionId: { type: String, required: true },
+    versionType: {
+      type: String,
+      enum: ['initial', 'humanized', 'user_edited', 'final_approved'],
+      required: true
+    },
+    title: { type: String, default: '' },
+    hook: { type: String, required: true },
+    body: { type: String, required: true },
+    cta: { type: String, default: '' },
+    hashtags: { type: [String], default: [] },
+    humanizationMode: {
+      type: String,
+      enum: ['light', 'professional', 'conversational', 'none'],
+      default: 'none'
+    },
+    qualityEvaluation: { type: qualityEvaluationSchema },
+    createdAt: { type: Date, default: Date.now },
+    note: { type: String, default: '' }
+  },
+  { _id: true }
+);
+
 const contentDraftSchema = new mongoose.Schema(
   {
     userId: {
@@ -148,7 +191,36 @@ const contentDraftSchema = new mongoose.Schema(
       body: { type: String, default: '' },
       cta: { type: String, default: '' },
       hashtags: { type: [String], default: [] },
+      mode: { type: String, default: 'professional' },
       humanizedAt: { type: Date }
+    },
+    userEditedDraft: {
+      hook: { type: String, default: '' },
+      body: { type: String, default: '' },
+      cta: { type: String, default: '' },
+      hashtags: { type: [String], default: [] },
+      editedAt: { type: Date }
+    },
+    finalApprovedDraft: {
+      hook: { type: String, default: '' },
+      body: { type: String, default: '' },
+      cta: { type: String, default: '' },
+      hashtags: { type: [String], default: [] },
+      approvedAt: { type: Date }
+    },
+    humanizationMode: {
+      type: String,
+      enum: ['light', 'professional', 'conversational', 'none'],
+      default: 'none'
+    },
+    qualityEvaluation: {
+      type: qualityEvaluationSchema,
+      default: null
+    },
+    // Maintained versions array allowing regeneration without losing previous versions
+    versions: {
+      type: [draftVersionSchema],
+      default: []
     },
     // Ancillary metadata
     keyTakeaways: {

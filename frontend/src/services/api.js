@@ -274,6 +274,23 @@ export const studioApi = {
       body: JSON.stringify(payload)
     }),
 
+  humanize: (id, payload = {}) =>
+    apiRequest(`/studio/drafts/${id}/humanize`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  approve: (id) =>
+    apiRequest(`/studio/drafts/${id}/approve`, {
+      method: 'POST'
+    }),
+
+  revertVersion: (id, payload) =>
+    apiRequest(`/studio/drafts/${id}/revert-version`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload)
+    }),
+
   updateDraft: (id, payload) =>
     apiRequest(`/studio/drafts/${id}`, {
       method: 'PUT',
@@ -283,6 +300,42 @@ export const studioApi = {
   deleteDraft: (id) =>
     apiRequest(`/studio/drafts/${id}`, {
       method: 'DELETE'
+    })
+};
+
+/**
+ * Writing Profile Endpoints
+ */
+export const profileApi = {
+  getProfile: () => apiRequest('/profile'),
+
+  analyzeSamples: (payload) =>
+    apiRequest('/profile/analyze', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  updateProfile: (payload) =>
+    apiRequest('/profile', {
+      method: 'PUT',
+      body: JSON.stringify(payload)
+    }),
+
+  addSample: (sample) =>
+    apiRequest('/profile/samples', {
+      method: 'POST',
+      body: JSON.stringify({ sample })
+    }),
+
+  handleSuggestion: (id, action = 'accept') =>
+    apiRequest(`/profile/suggestions/${id}`, {
+      method: 'POST',
+      body: JSON.stringify({ action })
+    }),
+
+  resetDefault: () =>
+    apiRequest('/profile/reset-default', {
+      method: 'POST'
     })
 };
 
@@ -300,6 +353,7 @@ export default {
   topicApi,
   newsApi,
   studioApi,
+  profileApi,
   dashboardApi,
   healthApi,
   getAuthToken,

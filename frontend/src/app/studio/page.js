@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
-import { studioApi, newsApi } from '@/services/api';
+import { studioApi, newsApi, profileApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
 
 function StudioWorkspaceContent() {
@@ -20,9 +20,15 @@ function StudioWorkspaceContent() {
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [recentDrafts, setRecentDrafts] = useState([]);
 
-  // Active Draft State
+  // Active Draft & Version States
   const [currentDraft, setCurrentDraft] = useState(null);
   const [activeApproach, setActiveApproach] = useState('news_update'); // 'news_update' | 'industry_analysis' | 'professional_opinion'
+  const [activeVersionType, setActiveVersionType] = useState('active'); // 'active' | 'initial' | 'humanized' | 'user_edited' | 'final_approved'
+
+  // Humanization Parameters
+  const [humanizationMode, setHumanizationMode] = useState('professional'); // 'light' | 'professional' | 'conversational'
+  const [humanizing, setHumanizing] = useState(false);
+  const [approving, setApproving] = useState(false);
 
   // Generation Input Parameters
   const [targetAudience, setTargetAudience] = useState('Senior software engineers and tech leaders');
@@ -59,7 +65,6 @@ function StudioWorkspaceContent() {
     try {
       const res = await newsApi.getAll({ limit: 40 });
       const items = res?.data?.items || [];
-      // Prioritize researched or selected articles
       const filtered = items.filter((a) => a.status !== 'rejected');
       setCandidateArticles(filtered);
 
@@ -69,7 +74,6 @@ function StudioWorkspaceContent() {
           setSelectedArticle(found);
           setSelectedArticleId(found._id);
         } else {
-          // Fetch directly by ID
           const singleRes = await newsApi.getById(preselectedArticleId);
           if (singleRes?.data) {
             setSelectedArticle(singleRes.data);
@@ -95,7 +99,6 @@ function StudioWorkspaceContent() {
       const items = res?.data?.items || [];
       setRecentDrafts(items);
 
-      // If draftId is provided in URL, load that draft
       if (draftIdParam) {
         const draftRes = await studioApi.getDraftById(draftIdParam);
         if (draftRes?.data) {
@@ -131,6 +134,7 @@ function StudioWorkspaceContent() {
   const loadDraftIntoStudio = (draft) => {
     setCurrentDraft(draft);
     setActiveApproach(draft.selectedApproach || 'news_update');
+    setActiveVersionType('active');
     setEditTitle(draft.title || '');
     setEditHook(draft.hook || '');
     setEditBody(draft.body || '');
@@ -272,7 +276,68 @@ function StudioWorkspaceContent() {
     }
   };
 
-  // 9. Save Manual Edits
+  // 9. Humanize Post using Personal Writing Profile (Part B)
+  const handleHumanizePost = async () => {
+    if (!currentDraft) return;
+    setHumanizing(true);
+    setError('');
+    try {
+      const res = await studioApi.humanize(currentDraft._id, {
+        mode: humanizationMode,
+        contentAngle
+      });
+      if (res?.data?.draft) {
+        loadDraftIntoStudio(res.data.draft);
+        showToast(`Post humanized successfully (${humanizationMode} mode)!`);
+        fetchDrafts();
+      }
+    } catch (err) {
+      setError(err.message || 'Humanization failed.');
+    } finally {
+      setHumanizing(false);
+    }
+  };
+
+  // 10. Approve Draft & Learn from Creator Edits (Part D)
+  const handleApproveDraft = async () => {
+    if (!currentDraft) return;
+    setApproving(true);
+    setError('');
+    try {
+      const res = await studioApi.approve(currentDraft._id);
+      if (res?.data?.draft) {
+        loadDraftIntoStudio(res.data.draft);
+        const sugCount = res.data.newSuggestions?.length || 0;
+        showToast(
+          sugCount > 0
+            ? `Post approved! Synthesized ${sugCount} new profile recommendation(s) for your review.`
+            : 'Post approved and marked ready for publishing!'
+        );
+        fetchDrafts();
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to approve draft.');
+    } finally {
+      setApproving(false);
+    }
+  };
+
+  // 11. Revert to a Previous Version
+  const handleRevertVersion = async (versionType) => {
+    if (!currentDraft) return;
+    try {
+      const res = await studioApi.revertVersion(currentDraft._id, { versionType });
+      if (res?.data) {
+        loadDraftIntoStudio(res.data);
+        setActiveVersionType(versionType);
+        showToast(`Reverted active post to ${versionType.replace('_', ' ')} version`);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to revert version.');
+    }
+  };
+
+  // 12. Save Manual Edits
   const handleSaveEdits = async (newStatus = null) => {
     if (!currentDraft) return;
     setSavingDraft(true);
@@ -300,7 +365,7 @@ function StudioWorkspaceContent() {
     }
   };
 
-  // 10. Copy Complete Post to Clipboard
+  // 13. Copy Complete Post to Clipboard
   const handleCopyToClipboard = () => {
     if (!currentDraft) return;
     const activeVar =
@@ -342,12 +407,14 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
     currentDraft?.variations?.[0];
 
   const hookOptions = currentVariation?.hookOptions || [];
-  const selectedHook = isEditing ? editHook : (currentDraft?.hook || currentVariation?.selectedHook || hookOptions[0]);
+  const selectedHook = isEditing
+    ? editHook
+    : currentDraft?.hook || currentVariation?.selectedHook || hookOptions[0];
 
   return (
     <AppLayout
       title="Content Studio"
-      subtitle="Transform verified news and deep research into high-converting LinkedIn thought leadership"
+      subtitle="Craft, humanize, and preview viral LinkedIn thought leadership"
     >
       {/* Toast Notification */}
       {toast && (
@@ -547,6 +614,76 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
             </div>
           </div>
 
+          {/* AI Humanization Control Box (Part B) */}
+          {currentDraft && (
+            <div className="bg-gradient-to-br from-indigo-50/80 to-purple-50/80 border border-indigo-200/80 rounded-2xl p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-base">👤</span>
+                  <h2 className="text-xs font-bold uppercase tracking-wider text-indigo-950">
+                    AI Humanization Engine
+                  </h2>
+                </div>
+                <Link
+                  href="/profile"
+                  className="text-[11px] font-bold text-indigo-700 hover:underline"
+                >
+                  Edit Profile →
+                </Link>
+              </div>
+
+              <p className="text-xs text-indigo-900 leading-relaxed">
+                Transform raw AI copy using your personal writing profile. Strips clichés, introduces dynamic
+                sentence cadence, and preserves verified facts.
+              </p>
+
+              {/* Mode Selection */}
+              <div className="space-y-1.5">
+                <label className="text-[11px] font-bold text-indigo-900">Humanization Intensity</label>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {[
+                    { id: 'light', label: 'Light', desc: 'De-AI-ify only' },
+                    { id: 'professional', label: 'Natural Prof', desc: 'Executive rhythm' },
+                    { id: 'conversational', label: 'Conversational', desc: 'Dynamic cadence' }
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      type="button"
+                      onClick={() => setHumanizationMode(m.id)}
+                      className={`p-2 rounded-xl text-center border transition-all cursor-pointer ${
+                        humanizationMode === m.id
+                          ? 'bg-indigo-600 text-white border-indigo-600 font-bold shadow-xs'
+                          : 'bg-white/80 border-indigo-200 text-indigo-950 hover:bg-white text-xs'
+                      }`}
+                    >
+                      <span className="block text-xs font-bold">{m.label}</span>
+                      <span className="text-[9px] opacity-80 block truncate">{m.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleHumanizePost}
+                disabled={humanizing}
+                className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs shadow-xs transition-colors flex items-center justify-center gap-2 cursor-pointer disabled:bg-slate-400"
+              >
+                {humanizing ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    <span>Humanizing with Your Voice...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>✨</span>
+                    <span>Humanize Post with My Voice</span>
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Recent Drafts Drawer */}
           {recentDrafts.length > 0 && (
             <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-3">
@@ -559,12 +696,17 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                     key={d._id}
                     onClick={() => loadDraftIntoStudio(d)}
                     className={`w-full text-left py-2.5 px-2 rounded-lg transition-colors flex items-center justify-between text-xs cursor-pointer ${
-                      currentDraft?._id === d._id ? 'bg-blue-50/80 font-bold text-blue-900' : 'hover:bg-slate-50 text-slate-700'
+                      currentDraft?._id === d._id
+                        ? 'bg-blue-50/80 font-bold text-blue-900'
+                        : 'hover:bg-slate-50 text-slate-700'
                     }`}
                   >
                     <div className="truncate pr-2">
                       <p className="truncate font-semibold">{d.title}</p>
-                      <p className="text-[10px] text-slate-400">{getApproachLabel(d.selectedApproach)} • {d.status}</p>
+                      <p className="text-[10px] text-slate-400">
+                        {getApproachLabel(d.selectedApproach)} • {d.status}{' '}
+                        {d.isHumanized && <span className="text-purple-600 font-bold">• Humanized</span>}
+                      </p>
                     </div>
                     <span className="text-slate-400 text-xs">→</span>
                   </button>
@@ -592,26 +734,74 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
               <p className="text-xs text-slate-500 max-w-md mx-auto leading-relaxed">
                 Choose a news article and target audience from the left panel, then click{' '}
                 <span className="font-semibold text-slate-700">"Generate 3 LinkedIn Post Approaches"</span>.
-                The engine will generate three contrasting frameworks for side-by-side comparison:
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 max-w-lg mx-auto text-left pt-2">
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                  <span className="font-bold text-blue-700 block mb-1">1. News Update</span>
-                  <p className="text-[11px] text-slate-500">What happened and why it matters immediately.</p>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                  <span className="font-bold text-purple-700 block mb-1">2. Industry Analysis</span>
-                  <p className="text-[11px] text-slate-500">Broader market impact, ripple effects, winners & losers.</p>
-                </div>
-                <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-xs">
-                  <span className="font-bold text-emerald-700 block mb-1">3. Professional Opinion</span>
-                  <p className="text-[11px] text-slate-500">Nuanced debate and strategic tradeoffs.</p>
-                </div>
-              </div>
             </div>
           ) : (
             /* Active Post Studio Workspace */
             <div className="space-y-6">
+              {/* Version History Selector Tabs (Part D) */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-slate-600">
+                  <span>Draft History:</span>
+                  <button
+                    type="button"
+                    onClick={() => handleRevertVersion('initial')}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                      activeVersionType === 'initial'
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                    }`}
+                  >
+                    1. Initial AI
+                  </button>
+                  {currentDraft.humanizedDraft?.body && (
+                    <button
+                      type="button"
+                      onClick={() => handleRevertVersion('humanized')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        activeVersionType === 'humanized'
+                          ? 'bg-indigo-600 text-white'
+                          : 'bg-indigo-50 hover:bg-indigo-100 text-indigo-800'
+                      }`}
+                    >
+                      2. Humanized ({currentDraft.humanizationMode || 'prof'})
+                    </button>
+                  )}
+                  {currentDraft.userEditedDraft?.body && (
+                    <button
+                      type="button"
+                      onClick={() => handleRevertVersion('user_edited')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        activeVersionType === 'user_edited'
+                          ? 'bg-amber-600 text-white'
+                          : 'bg-amber-50 hover:bg-amber-100 text-amber-800'
+                      }`}
+                    >
+                      3. User Edits
+                    </button>
+                  )}
+                  {currentDraft.finalApprovedDraft?.body && (
+                    <button
+                      type="button"
+                      onClick={() => handleRevertVersion('final_approved')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-colors cursor-pointer ${
+                        activeVersionType === 'final_approved'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
+                      4. Final Approved ✓
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-slate-400">
+                    {currentDraft.versions?.length || 1} versions tracked
+                  </span>
+                </div>
+              </div>
+
               {/* 3-Approach Selector Tabs */}
               <div className="bg-white border border-slate-200/80 rounded-2xl p-2 shadow-xs">
                 <div className="grid grid-cols-3 gap-2">
@@ -717,6 +907,79 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                   })}
                 </div>
               </div>
+
+              {/* Quality Evaluation Card (Part C) */}
+              {currentDraft.qualityEvaluation && (
+                <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">🎯</span>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                        Humanization Quality Evaluation
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                        Overall {currentDraft.qualityEvaluation.overallQualityScore}/100
+                      </span>
+                    </div>
+                    {currentDraft.qualityEvaluation.genericFillerDetected?.length === 0 ? (
+                      <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-1">
+                        <span>✓</span>
+                        <span>Zero Generic AI Filler</span>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] font-bold text-amber-600">
+                        {currentDraft.qualityEvaluation.genericFillerDetected.length} Cliche(s) Flagged
+                      </span>
+                    )}
+                  </div>
+
+                  {/* 6 Score Meters */}
+                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-center">
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Naturalness</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {currentDraft.qualityEvaluation.naturalnessScore}%
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Profile Match</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {currentDraft.qualityEvaluation.profileConsistencyScore}%
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Clarity</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {currentDraft.qualityEvaluation.clarityScore}%
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Engagement</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {currentDraft.qualityEvaluation.engagementPotentialScore}%
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Relevance</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {currentDraft.qualityEvaluation.relevanceScore}%
+                      </span>
+                    </div>
+                    <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-100 space-y-0.5">
+                      <span className="text-[10px] text-slate-400 uppercase font-bold block">Factual Accuracy</span>
+                      <span className="text-sm font-bold text-slate-900">
+                        {currentDraft.qualityEvaluation.factualConsistencyScore}%
+                      </span>
+                    </div>
+                  </div>
+
+                  {currentDraft.qualityEvaluation.feedbackNotes && (
+                    <p className="text-xs text-slate-600 bg-slate-50 p-3 rounded-xl border border-slate-100 leading-relaxed italic">
+                      &ldquo;{currentDraft.qualityEvaluation.feedbackNotes}&rdquo;
+                    </p>
+                  )}
+                </div>
+              )}
 
               {/* LinkedIn Post Mockup & Editor */}
               <div className="bg-white border border-slate-200/80 rounded-2xl shadow-xs overflow-hidden">
@@ -898,7 +1161,7 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                   )}
                 </div>
 
-                {/* Footer Controls: Copy & Status Save */}
+                {/* Footer Controls: Approve, Copy & Status Save */}
                 <div className="p-4 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500 font-semibold">Workflow Status:</span>
@@ -919,6 +1182,15 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleApproveDraft}
+                      disabled={approving}
+                      className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <span>✓</span>
+                      <span>{approving ? 'Approving...' : 'Approve & Learn from Edits'}</span>
+                    </button>
                     <button
                       type="button"
                       onClick={handleCopyToClipboard}

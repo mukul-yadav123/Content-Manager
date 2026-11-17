@@ -11,6 +11,10 @@ import {
   updateDraftSchema,
   draftsQuerySchema
 } from '../schemas/studio.schema.js';
+import {
+  humanizeDraftSchema,
+  revertVersionSchema
+} from '../schemas/humanization.schema.js';
 
 const router = Router();
 
@@ -37,6 +41,15 @@ router.post('/drafts/:id/regenerate-post', validate({ body: regeneratePostSchema
 
 // Change content angle
 router.patch('/drafts/:id/angle', validate({ body: changeAngleSchema }), studioController.changeAngle);
+
+// Humanize post using personal writing profile & selected mode
+router.post('/drafts/:id/humanize', validate({ body: humanizeDraftSchema }), studioController.humanizePost);
+
+// Approve draft and learn from creator edit patterns
+router.post('/drafts/:id/approve', studioController.approveDraft);
+
+// Revert draft to previous version
+router.patch('/drafts/:id/revert-version', validate({ body: revertVersionSchema }), studioController.revertVersion);
 
 // Update draft manual edits
 router.put('/drafts/:id', validate({ body: updateDraftSchema }), studioController.updateDraft);
