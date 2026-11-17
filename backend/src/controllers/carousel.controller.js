@@ -21,6 +21,7 @@ import ApiResponse from '../utils/apiResponse.js';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
 import logger from '../utils/logger.js';
+import { trackGenerationJob } from '../utils/jobTracker.js';
 
 /**
  * @desc Generate a 5-7 slide carousel from draft or news story
@@ -50,14 +51,23 @@ export const generateCarousel = asyncHandler(async (req, res) => {
     }
   }
 
-  const carousel = await generateCarouselContent({
-    draftId,
-    articleId,
-    slideCount,
-    theme,
-    aspectRatio,
-    customInstructions,
-    user: req.user
+  const carousel = await trackGenerationJob({
+    userId: req.user._id,
+    jobType: 'carousel-generation',
+    inputParams: { draftId, articleId, slideCount, theme, aspectRatio },
+    targetDraftId: draftId || null,
+    targetArticleId: articleId || null,
+    execute: async () => {
+      return await generateCarouselContent({
+        draftId,
+        articleId,
+        slideCount,
+        theme,
+        aspectRatio,
+        customInstructions,
+        user: req.user
+      });
+    }
   });
 
   return res

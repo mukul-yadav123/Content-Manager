@@ -9,7 +9,7 @@ import env from '../config/env.js';
 const getCookieOptions = () => ({
   httpOnly: true,
   secure: env.NODE_ENV === 'production',
-  sameSite: env.NODE_ENV === 'production' ? 'strict' : 'lax',
+  sameSite: 'strict',
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
   path: '/'
 });

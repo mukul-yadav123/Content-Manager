@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import mediaController from '../controllers/media.controller.js';
 import { authenticate } from '../middlewares/auth.middleware.js';
+import { aiGenerationLimiter } from '../middlewares/rateLimiter.js';
 import { validate } from '../middlewares/validate.js';
 import {
   generateImageSchema,
@@ -14,13 +15,13 @@ const router = Router();
 router.use(authenticate);
 
 // Generate image for a draft
-router.post('/generate', validate({ body: generateImageSchema }), mediaController.generateImage);
+router.post('/generate', aiGenerationLimiter, validate({ body: generateImageSchema }), mediaController.generateImage);
 
 // Generate variation for a draft
-router.post('/drafts/:draftId/variation', validate({ body: generateVariationSchema }), mediaController.generateVariation);
+router.post('/drafts/:draftId/variation', aiGenerationLimiter, validate({ body: generateVariationSchema }), mediaController.generateVariation);
 
 // Generate/Regenerate detailed visual prompt only
-router.post('/generate-prompt', validate({ body: generatePromptSchema }), mediaController.generatePromptOnly);
+router.post('/generate-prompt', aiGenerationLimiter, validate({ body: generatePromptSchema }), mediaController.generatePromptOnly);
 
 // Get all media assets for a draft
 router.get('/drafts/:draftId', mediaController.getDraftMedia);

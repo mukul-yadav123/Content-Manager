@@ -440,54 +440,69 @@ export const buildSlideHtml = (slide, carousel, author = {}) => {
 </html>`;
 };
 
+// Valid minimal 1x1 PNG binary fallback buffer (valid PNG magic signature & IHDR)
+const FALLBACK_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+export const getFallbackPngBuffer = () => Buffer.from(FALLBACK_PNG_BASE64, 'base64');
+
 /**
  * Renders an HTML string into a high-quality PNG Buffer using headless Chrome
+ * Optionally accepts a pre-existing browser instance to reuse across multiple slides
  */
-export const renderSlideBuffer = async (html, dimensions = { width: 1080, height: 1350 }) => {
+export const renderSlideBuffer = async (
+  html,
+  dimensions = { width: 1080, height: 1350 },
+  existingBrowser = null
+) => {
   const executablePath = getBrowserExecutablePath();
 
-  if (!executablePath) {
-    logger.warn('No local Chrome/Edge browser found. Generating high-res mock slide PNG buffer.');
-    return Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${dimensions.width}" height="${dimensions.height}"><rect width="100%" height="100%" fill="#0a1128"/><text x="50" y="100" fill="#38bdf8" font-size="40" font-family="sans-serif">LinkedIn Slide</text></svg>`
-    );
+  if (!executablePath && !existingBrowser) {
+    logger.warn('No local Chrome/Edge browser found. Generating valid PNG fallback buffer.');
+    return getFallbackPngBuffer();
   }
 
-  let browser = null;
+  let browser = existingBrowser;
+  let shouldCloseBrowser = false;
+
   try {
-    browser = await puppeteer.launch({
-      executablePath,
-      args: ['--no-sandbox', '--disable-gpu', '--headless=new', '--hide-scrollbars'],
-      headless: true
-    });
+    if (!browser) {
+      browser = await puppeteer.launch({
+        executablePath,
+        args: ['--no-sandbox', '--disable-gpu', '--headless=new', '--hide-scrollbars'],
+        headless: true
+      });
+      shouldCloseBrowser = true;
+    }
 
     const page = await browser.newPage();
-    await page.setViewport({
-      width: dimensions.width,
-      height: dimensions.height,
-      deviceScaleFactor: 2 // High DPI retina rendering
-    });
-
-    await page.setContent(html, { waitUntil: 'load' });
-    const buffer = await page.screenshot({
-      type: 'png',
-      clip: {
-        x: 0,
-        y: 0,
+    try {
+      await page.setViewport({
         width: dimensions.width,
-        height: dimensions.height
-      }
-    });
+        height: dimensions.height,
+        deviceScaleFactor: 2 // High DPI retina rendering
+      });
 
-    return buffer;
+      await page.setContent(html, { waitUntil: 'load' });
+      const buffer = await page.screenshot({
+        type: 'png',
+        clip: {
+          x: 0,
+          y: 0,
+          width: dimensions.width,
+          height: dimensions.height
+        }
+      });
+
+      return buffer;
+    } finally {
+      await page.close().catch(() => {});
+    }
   } catch (error) {
     logger.error(`Puppeteer slide render error: ${error.message}`);
-    // Safe deterministic SVG-backed PNG buffer fallback
-    return Buffer.from(
-      `<svg xmlns="http://www.w3.org/2000/svg" width="${dimensions.width}" height="${dimensions.height}"><rect width="100%" height="100%" fill="#0a1128"/><text x="50" y="100" fill="#38bdf8" font-size="40" font-family="sans-serif">LinkedIn Slide</text></svg>`
-    );
+    return getFallbackPngBuffer();
   } finally {
-    if (browser) {
+    if (browser && shouldCloseBrowser) {
       await browser.close().catch(() => {});
     }
   }
@@ -495,24 +510,46 @@ export const renderSlideBuffer = async (html, dimensions = { width: 1080, height
 
 /**
  * Renders all slides in a Carousel and uploads to Cloudinary
+ * Reuses a single shared browser instance for optimal performance
  */
 export const renderCarouselSlides = async (carousel, author = {}) => {
   logger.info(`Rendering ${carousel.slides.length} slides for carousel "${carousel.title}" (ID: ${carousel._id})`);
 
-  for (let i = 0; i < carousel.slides.length; i++) {
-    const slide = carousel.slides[i];
-    const html = buildSlideHtml(slide, carousel, author);
-    const buffer = await renderSlideBuffer(html, carousel.dimensions);
+  const executablePath = getBrowserExecutablePath();
+  let sharedBrowser = null;
 
-    // Upload to Cloudinary
-    const uploadRes = await uploadImageBuffer(
-      buffer,
-      `linkedin-content-studio/carousels/${carousel._id}`,
-      `slide_${String(slide.slideNumber).padStart(2, '0')}`
-    );
+  if (executablePath) {
+    try {
+      sharedBrowser = await puppeteer.launch({
+        executablePath,
+        args: ['--no-sandbox', '--disable-gpu', '--headless=new', '--hide-scrollbars'],
+        headless: true
+      });
+    } catch (err) {
+      logger.warn(`Could not launch shared Puppeteer browser (${err.message}). Falling back to per-slide render.`);
+    }
+  }
 
-    slide.renderedImageUrl = uploadRes.secureUrl;
-    slide.renderedImagePublicId = uploadRes.publicId;
+  try {
+    for (let i = 0; i < carousel.slides.length; i++) {
+      const slide = carousel.slides[i];
+      const html = buildSlideHtml(slide, carousel, author);
+      const buffer = await renderSlideBuffer(html, carousel.dimensions, sharedBrowser);
+
+      // Upload to Cloudinary
+      const uploadRes = await uploadImageBuffer(
+        buffer,
+        `linkedin-content-studio/carousels/${carousel._id}`,
+        `slide_${String(slide.slideNumber).padStart(2, '0')}`
+      );
+
+      slide.renderedImageUrl = uploadRes.secureUrl;
+      slide.renderedImagePublicId = uploadRes.publicId;
+    }
+  } finally {
+    if (sharedBrowser) {
+      await sharedBrowser.close().catch(() => {});
+    }
   }
 
   carousel.isRendered = true;
@@ -525,16 +562,38 @@ export const renderCarouselSlides = async (carousel, author = {}) => {
 
 /**
  * Creates a ZIP archive of all rendered slide PNGs
+ * Reuses a single shared browser instance
  */
 export const createCarouselZipStream = async (carousel, author = {}) => {
   const archive = new ZipArchive({ zlib: { level: 9 } });
 
-  // Render each slide buffer directly or stream existing
-  for (const slide of carousel.slides) {
-    const html = buildSlideHtml(slide, carousel, author);
-    const buffer = await renderSlideBuffer(html, carousel.dimensions);
-    const filename = `slide-${String(slide.slideNumber).padStart(2, '0')}.png`;
-    archive.append(buffer, { name: filename });
+  const executablePath = getBrowserExecutablePath();
+  let sharedBrowser = null;
+
+  if (executablePath) {
+    try {
+      sharedBrowser = await puppeteer.launch({
+        executablePath,
+        args: ['--no-sandbox', '--disable-gpu', '--headless=new', '--hide-scrollbars'],
+        headless: true
+      });
+    } catch (err) {
+      logger.warn(`Could not launch shared browser for ZIP export (${err.message}).`);
+    }
+  }
+
+  try {
+    // Render each slide buffer directly or stream existing
+    for (const slide of carousel.slides) {
+      const html = buildSlideHtml(slide, carousel, author);
+      const buffer = await renderSlideBuffer(html, carousel.dimensions, sharedBrowser);
+      const filename = `slide-${String(slide.slideNumber).padStart(2, '0')}.png`;
+      archive.append(buffer, { name: filename });
+    }
+  } finally {
+    if (sharedBrowser) {
+      await sharedBrowser.close().catch(() => {});
+    }
   }
 
   // Include a helpful LinkedIn publishing instruction README

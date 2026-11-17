@@ -321,6 +321,13 @@ const runCarouselTests = async () => {
     assert(zipExportRes.headers['content-type'] === 'application/zip', 'Returns Content-Type: application/zip');
     assert(zipExportRes.headers['content-disposition'].includes('.zip'), 'Includes attachment filename in header');
 
+    // 4.10b Export ZIP via query parameter token (INT-03 verification)
+    const zipQueryTokenRes = await request(app)
+      .get(`/api/carousels/${carouselId}/export/zip?token=${encodeURIComponent(tokenA)}`);
+
+    assert(zipQueryTokenRes.status === 200, 'GET /api/carousels/:id/export/zip?token=... returns HTTP 200 via query auth');
+    assert(zipQueryTokenRes.headers['content-type'] === 'application/zip', 'Query token auth returns application/zip');
+
     // 4.11 Delete Carousel (DELETE /api/carousels/:id)
     const deleteRes = await request(app)
       .delete(`/api/carousels/${carouselId}`)

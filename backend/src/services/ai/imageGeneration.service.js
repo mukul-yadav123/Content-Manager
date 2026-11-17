@@ -201,41 +201,52 @@ export const generateAndSavePostImage = async ({
     style
   );
 
-  // 4. Save MediaAsset in MongoDB
+  // 4. Save MediaAsset in MongoDB with Cloudinary rollback protection
   const isFirstImage = !draft.mediaAssets || draft.mediaAssets.length === 0;
 
-  const mediaAsset = await MediaAsset.create({
-    userId,
-    contentDraftId: draft._id,
-    publicId: uploadResult.publicId,
-    secureUrl: uploadResult.secureUrl,
-    thumbnailUrl: uploadResult.thumbnailUrl || uploadResult.secureUrl,
-    assetType: 'single-image',
-    imageStyle: style,
-    generationModel: env.OPENAI_IMAGE_MODEL || 'dall-e-3',
-    format: uploadResult.format || 'webp',
-    width: uploadResult.width || 1024,
-    height: uploadResult.height || 1024,
-    bytes: uploadResult.bytes || 0,
-    promptUsed: finalPrompt,
-    revisedPrompt: revisedPrompt || finalPrompt,
-    concept: finalConcept,
-    aspectRatio,
-    altText,
-    isPreferred: isFirstImage,
-    metadata: {
-      draftTitle: draft.title,
-      styleDescription: IMAGE_STYLE_DESCRIPTIONS[style] || style,
-      generatedAt: new Date()
-    }
-  });
+  let mediaAsset;
+  try {
+    mediaAsset = await MediaAsset.create({
+      userId,
+      contentDraftId: draft._id,
+      publicId: uploadResult.publicId,
+      secureUrl: uploadResult.secureUrl,
+      thumbnailUrl: uploadResult.thumbnailUrl || uploadResult.secureUrl,
+      assetType: 'single-image',
+      imageStyle: style,
+      generationModel: env.OPENAI_IMAGE_MODEL || 'dall-e-3',
+      format: uploadResult.format || 'webp',
+      width: uploadResult.width || 1024,
+      height: uploadResult.height || 1024,
+      bytes: uploadResult.bytes || 0,
+      promptUsed: finalPrompt,
+      revisedPrompt: revisedPrompt || finalPrompt,
+      concept: finalConcept,
+      aspectRatio,
+      altText,
+      isPreferred: isFirstImage,
+      metadata: {
+        draftTitle: draft.title,
+        styleDescription: IMAGE_STYLE_DESCRIPTIONS[style] || style,
+        generatedAt: new Date()
+      }
+    });
 
-  // 5. Associate with Draft
-  draft.mediaAssets.push(mediaAsset._id);
-  if (isFirstImage || !draft.selectedMediaAsset) {
-    draft.selectedMediaAsset = mediaAsset._id;
+    // 5. Associate with Draft
+    draft.mediaAssets.push(mediaAsset._id);
+    if (isFirstImage || !draft.selectedMediaAsset) {
+      draft.selectedMediaAsset = mediaAsset._id;
+    }
+    await draft.save();
+  } catch (dbError) {
+    // Rollback uploaded Cloudinary asset if database persistence fails
+    if (uploadResult?.publicId) {
+      await cloudinaryService.deleteImage(uploadResult.publicId).catch((err) => {
+        logger.warn(`Failed to cleanup orphaned Cloudinary asset ${uploadResult.publicId}: ${err.message}`);
+      });
+    }
+    throw dbError;
   }
-  await draft.save();
 
   logger.info(`Successfully created and associated MediaAsset ${mediaAsset._id} with draft ${draft._id}`);
   return mediaAsset;

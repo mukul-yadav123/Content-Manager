@@ -4,6 +4,7 @@ import NewsArticle from '../models/NewsArticle.js';
 import Topic from '../models/Topic.js';
 import imageGenerationService from '../services/ai/imageGeneration.service.js';
 import cloudinaryService from '../services/storage/cloudinary.service.js';
+import { trackGenerationJob } from '../utils/jobTracker.js';
 import ApiResponse from '../utils/apiResponse.js';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -44,16 +45,25 @@ export const generateImage = asyncHandler(async (req, res) => {
 
   logger.info(`Generating ${style} image for draft "${draft.title}" (User: ${req.user._id})`);
 
-  // 3. Generate and Save Media Asset
-  const mediaAsset = await imageGenerationService.generateAndSavePostImage({
-    draft,
-    article,
-    topic,
-    style,
-    customPrompt,
-    concept,
-    aspectRatio,
-    userId: req.user._id
+  // 3. Generate and Save Media Asset wrapped in GenerationJob lifecycle
+  const mediaAsset = await trackGenerationJob({
+    userId: req.user._id,
+    jobType: 'image-generation',
+    inputParams: { draftId, style, customPrompt, concept, aspectRatio },
+    targetDraftId: draft._id,
+    targetArticleId: draft.newsArticleId || null,
+    execute: async () => {
+      return await imageGenerationService.generateAndSavePostImage({
+        draft,
+        article,
+        topic,
+        style,
+        customPrompt,
+        concept,
+        aspectRatio,
+        userId: req.user._id
+      });
+    }
   });
 
   return res.status(201).json(ApiResponse.created(mediaAsset, 'LinkedIn post image generated and uploaded successfully'));

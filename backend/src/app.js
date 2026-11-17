@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import env from './config/env.js';
 import requestLogger from './middlewares/requestLogger.js';
 import errorHandler from './middlewares/errorHandler.js';
+import { apiLimiter } from './middlewares/rateLimiter.js';
 import apiRouter from './routes/index.js';
 import ApiError from './utils/apiError.js';
 
@@ -29,6 +30,9 @@ app.use(cookieParser(env.COOKIE_SECRET));
 
 // HTTP Request logging
 app.use(requestLogger);
+
+// Apply rate limiter to all API routes
+app.use('/api', apiLimiter);
 
 // API Routes
 app.use('/api', apiRouter);

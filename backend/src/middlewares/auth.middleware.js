@@ -19,6 +19,10 @@ export const authenticate = asyncHandler(async (req, res, next) => {
   else if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
     token = req.headers.authorization.split(' ')[1];
   }
+  // 3. Check query parameter token (for direct stream exports, ZIP/PNG downloads)
+  else if (req.query && req.query.token) {
+    token = req.query.token;
+  }
 
   if (!token) {
     throw ApiError.unauthorized('Authentication required. Please log in.');

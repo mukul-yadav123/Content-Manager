@@ -86,11 +86,16 @@ export const discoverNewsForTopic = async ({
   const candidates = Array.from(uniqueCandidateMap.values());
   const candidateUrls = candidates.map((a) => a.normalizedUrl);
 
-  // 6. Query MongoDB for existing articles of this user to check both exact and near duplicates
+  // 6. Query MongoDB for existing articles of this user (bounded to past 14 days for event clustering + exact URL candidates)
+  const recentCutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
   const existingArticles = await NewsArticle.find({
     userId,
-    isArchived: false
-  });
+    isArchived: false,
+    $or: [
+      { publishedAt: { $gte: recentCutoff } },
+      { normalizedUrl: { $in: candidateUrls } }
+    ]
+  }).limit(500);
 
   const existingUrlMap = new Map();
   existingArticles.forEach((doc) => {

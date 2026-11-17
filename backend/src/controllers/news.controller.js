@@ -592,10 +592,11 @@ export const deleteNews = asyncHandler(async (req, res) => {
     throw ApiError.notFound('News story not found or already deleted.');
   }
 
-  // Update topic article count
-  await Topic.findByIdAndUpdate(article.topicId, {
-    $inc: { articlesCount: -1 }
-  });
+  // Update topic article count safely with non-negative lower bound
+  await Topic.findOneAndUpdate(
+    { _id: article.topicId, articlesCount: { $gt: 0 } },
+    { $inc: { articlesCount: -1 } }
+  );
 
   return res.status(200).json(
     ApiResponse.success({ _id: req.params.id }, 'News story deleted successfully')

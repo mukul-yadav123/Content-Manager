@@ -2,6 +2,10 @@ import ContentDraft from '../models/ContentDraft.js';
 import NewsArticle from '../models/NewsArticle.js';
 import Topic from '../models/Topic.js';
 import WritingProfile from '../models/WritingProfile.js';
+import MediaAsset from '../models/MediaAsset.js';
+import Carousel from '../models/Carousel.js';
+import cloudinaryService from '../services/storage/cloudinary.service.js';
+import { trackGenerationJob } from '../utils/jobTracker.js';
 import postGenerationService from '../services/ai/postGeneration.service.js';
 import humanizationService from '../services/ai/humanization.service.js';
 import editLearningService from '../services/ai/editLearning.service.js';
@@ -24,10 +28,10 @@ export const generatePosts = asyncHandler(async (req, res) => {
     postFormat = 'standard'
   } = req.body;
 
-  // 1. Fetch news article and verify accessibility
+  // 1. Fetch news article and verify tenant ownership
   const article = await NewsArticle.findOne({
     _id: articleId,
-    $or: [{ userId: req.user._id }, { userId: { $exists: false } }, { userId: null }]
+    userId: req.user._id
   });
 
   if (!article) {
@@ -42,87 +46,97 @@ export const generatePosts = asyncHandler(async (req, res) => {
 
   logger.info(`Generating LinkedIn post variations for article "${article.title}" (User: ${req.user._id})`);
 
-  // 3. Call generation service to produce the 3 approaches in one run
-  const generationResult = await postGenerationService.generateLinkedInPosts({
-    article,
-    research: article.deepResearch,
-    topic,
-    targetAudience,
-    contentAngle,
-    preferredStyle,
-    postFormat
-  });
-
-  const { variations } = generationResult;
-  if (!variations || variations.length === 0) {
-    throw ApiError.internal('Failed to generate post variations');
-  }
-
-  // 4. Set the default selected approach (news_update)
-  const defaultVar = variations.find((v) => v.approach === 'news_update') || variations[0];
-  const initialHook = defaultVar.selectedHook || defaultVar.hookOptions[0] || 'Important industry update:';
-  const initialBody = defaultVar.content;
-  const initialCta = defaultVar.closingQuestion || '';
-  const initialTags = defaultVar.hashtags || [];
-
-  // 5. Calculate counts
-  const fullText = `${initialHook}\n\n${initialBody}\n\n${initialCta}`;
-  const characterCount = fullText.length;
-  const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
-
-  const initialDraftPayload = {
-    hook: initialHook,
-    body: initialBody,
-    cta: initialCta,
-    hashtags: initialTags
-  };
-
-  const initialVersion = {
-    versionId: `ver-initial-${Date.now()}`,
-    versionType: 'initial',
-    title: defaultVar.headline || article.title,
-    hook: initialHook,
-    body: initialBody,
-    cta: initialCta,
-    hashtags: initialTags,
-    humanizationMode: 'none',
-    createdAt: new Date(),
-    note: `Initial AI generation (${defaultVar.approachLabel || defaultVar.approach})`
-  };
-
-  // 6. Create ContentDraft document
-  const draft = await ContentDraft.create({
+  // 3. Execute generation wrapped in a GenerationJob lifecycle
+  const draft = await trackGenerationJob({
     userId: req.user._id,
-    topicId: article.topicId || null,
-    newsArticleId: article._id,
-    title: defaultVar.headline || article.title,
-    hook: initialHook,
-    body: initialBody,
-    cta: initialCta,
-    hashtags: initialTags,
-    format: postFormat || 'standard',
-    status: 'draft',
-    variations,
-    selectedApproach: defaultVar.approach,
-    targetAudience,
-    contentAngle,
-    preferredStyle,
-    isHumanized: false,
-    initialDraft: initialDraftPayload,
-    versions: [initialVersion],
-    keyTakeaways: defaultVar.keyTakeaways || [],
-    closingQuestion: defaultVar.closingQuestion || '',
-    sourceAttribution: defaultVar.sourceAttribution || '',
-    suggestedImageConcept: defaultVar.suggestedImageConcept || '',
-    characterCount,
-    wordCount
-  });
+    jobType: 'post-generation',
+    inputParams: { articleId, targetAudience, contentAngle, preferredStyle, postFormat },
+    targetArticleId: article._id,
+    execute: async () => {
+      const generationResult = await postGenerationService.generateLinkedInPosts({
+        article,
+        research: article.deepResearch,
+        topic,
+        targetAudience,
+        contentAngle,
+        preferredStyle,
+        postFormat
+      });
 
-  // 7. Update news article status to 'drafted' or 'selected'
-  if (['discovered', 'evaluated', 'shortlisted'].includes(article.status)) {
-    article.status = 'selected';
-    await article.save();
-  }
+      const { variations } = generationResult;
+      if (!variations || variations.length === 0) {
+        throw ApiError.internal('Failed to generate post variations');
+      }
+
+      // 4. Set the default selected approach (news_update)
+      const defaultVar = variations.find((v) => v.approach === 'news_update') || variations[0];
+      const initialHook = defaultVar.selectedHook || defaultVar.hookOptions[0] || 'Important industry update:';
+      const initialBody = defaultVar.content;
+      const initialCta = defaultVar.closingQuestion || '';
+      const initialTags = defaultVar.hashtags || [];
+
+      // 5. Calculate counts
+      const fullText = `${initialHook}\n\n${initialBody}\n\n${initialCta}`;
+      const characterCount = fullText.length;
+      const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
+
+      const initialDraftPayload = {
+        hook: initialHook,
+        body: initialBody,
+        cta: initialCta,
+        hashtags: initialTags
+      };
+
+      const initialVersion = {
+        versionId: `ver-initial-${Date.now()}`,
+        versionType: 'initial',
+        title: defaultVar.headline || article.title,
+        hook: initialHook,
+        body: initialBody,
+        cta: initialCta,
+        hashtags: initialTags,
+        humanizationMode: 'none',
+        createdAt: new Date(),
+        note: `Initial AI generation (${defaultVar.approachLabel || defaultVar.approach})`
+      };
+
+      // 6. Create ContentDraft document
+      const createdDraft = await ContentDraft.create({
+        userId: req.user._id,
+        topicId: article.topicId || null,
+        newsArticleId: article._id,
+        title: defaultVar.headline || article.title,
+        hook: initialHook,
+        body: initialBody,
+        cta: initialCta,
+        hashtags: initialTags,
+        format: postFormat || 'standard',
+        status: 'draft',
+        variations,
+        selectedApproach: defaultVar.approach,
+        targetAudience,
+        contentAngle,
+        preferredStyle,
+        isHumanized: false,
+        initialDraft: initialDraftPayload,
+        versions: [initialVersion],
+        keyTakeaways: defaultVar.keyTakeaways || [],
+        closingQuestion: defaultVar.closingQuestion || '',
+        sourceAttribution: defaultVar.sourceAttribution || '',
+        suggestedImageConcept: defaultVar.suggestedImageConcept || '',
+        characterCount,
+        wordCount
+      });
+
+      // 7. Update news article status to 'drafted' or 'selected'
+      if (['discovered', 'evaluated', 'shortlisted'].includes(article.status)) {
+        article.status = 'selected';
+        await article.save();
+      }
+
+      return createdDraft;
+    }
+  });
 
   return res.status(201).json(ApiResponse.created(draft, 'LinkedIn post variations generated successfully'));
 });
@@ -750,6 +764,18 @@ export const deleteDraft = asyncHandler(async (req, res) => {
   if (!draft) {
     throw ApiError.notFound('Draft not found');
   }
+
+  // Clean up associated MediaAssets from Cloudinary & MongoDB
+  const mediaAssets = await MediaAsset.find({ contentDraftId: draft._id, userId: req.user._id });
+  for (const asset of mediaAssets) {
+    if (asset.publicId) {
+      await cloudinaryService.deleteImage(asset.publicId).catch(() => {});
+    }
+  }
+  await MediaAsset.deleteMany({ contentDraftId: draft._id, userId: req.user._id });
+
+  // Clean up associated Carousels
+  await Carousel.deleteMany({ contentDraftId: draft._id, userId: req.user._id });
 
   return res.status(200).json(ApiResponse.success(null, 'Draft deleted successfully'));
 });

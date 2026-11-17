@@ -1,4 +1,6 @@
 import { Topic, TOPIC_CATEGORIES, TOPIC_REGIONS, FRESHNESS_PREFERENCES, GENERATION_PRIORITIES } from '../models/Topic.js';
+import { NewsArticle } from '../models/NewsArticle.js';
+import { ContentDraft } from '../models/ContentDraft.js';
 import ApiResponse from '../utils/apiResponse.js';
 import ApiError from '../utils/apiError.js';
 import asyncHandler from '../utils/asyncHandler.js';
@@ -233,6 +235,26 @@ export const deleteTopic = asyncHandler(async (req, res) => {
   if (!topic) {
     throw ApiError.notFound('Topic not found or already deleted.');
   }
+
+  // Cascade cleanup for dependent records to maintain database referential integrity
+  // 1. Delete associated un-used news articles to prevent orphaned data
+  await NewsArticle.deleteMany({
+    topicId: topic._id,
+    userId: req.user._id,
+    status: { $ne: 'used' }
+  });
+
+  // 2. Archive any used news articles to preserve post lineage
+  await NewsArticle.updateMany(
+    { topicId: topic._id, userId: req.user._id, status: 'used' },
+    { $set: { isArchived: true } }
+  );
+
+  // 3. Nullify topic reference on drafts so drafts remain readable
+  await ContentDraft.updateMany(
+    { topicId: topic._id, userId: req.user._id },
+    { $set: { topicId: null } }
+  );
 
   return res.status(200).json(
     ApiResponse.success({ _id: req.params.id }, 'Topic deleted successfully')
