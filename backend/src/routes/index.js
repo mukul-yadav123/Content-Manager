@@ -6,6 +6,7 @@ import dashboardRoutes from './dashboard.routes.js';
 import newsRoutes from './news.routes.js';
 import studioRoutes from './studio.routes.js';
 import profileRoutes from './profile.routes.js';
+import mediaRoutes from './media.routes.js';
 
 const router = Router();
 
@@ -23,6 +24,9 @@ router.use('/news', newsRoutes);
 
 // Mount Writing Profile routes
 router.use('/profile', profileRoutes);
+
+// Mount Media & AI Image Generation routes
+router.use('/media', mediaRoutes);
 
 // Mount Studio & Content Generation routes
 router.use('/studio', studioRoutes);

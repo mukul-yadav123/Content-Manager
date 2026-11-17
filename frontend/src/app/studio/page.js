@@ -4,8 +4,58 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import AppLayout from '@/components/layout/AppLayout';
-import { studioApi, newsApi, profileApi } from '@/services/api';
+import { studioApi, newsApi, profileApi, mediaApi } from '@/services/api';
 import { useAuth } from '@/context/AuthContext';
+
+const IMAGE_STYLES = [
+  {
+    id: 'editorial',
+    name: 'Editorial Photography',
+    badge: 'Realism',
+    icon: '📸',
+    desc: 'Cinematic studio lighting, shallow depth of field, premium photographic realism'
+  },
+  {
+    id: 'tech_illustration',
+    name: 'Tech Illustration',
+    badge: '3D Isometric',
+    icon: '⚡',
+    desc: 'Isometric 3D, modular architecture, refined cyber-software elements'
+  },
+  {
+    id: 'business_illustration',
+    name: 'Business Illustration',
+    badge: 'Corporate',
+    icon: '💼',
+    desc: 'Contemporary corporate palette, strategic collaboration motifs, clean geometric silhouettes'
+  },
+  {
+    id: 'news_graphic',
+    name: 'News Graphic',
+    badge: 'Editorial',
+    icon: '📰',
+    desc: 'High-impact editorial graphic, dynamic focal point, breaking news aesthetic'
+  },
+  {
+    id: 'data_visual',
+    name: 'Data Visual',
+    badge: 'Abstract Data',
+    icon: '📊',
+    desc: 'Abstract 3D data visualization, glowing interconnected nodes, chart geometry'
+  },
+  {
+    id: 'minimalist_concept',
+    name: 'Minimalist Concept',
+    badge: 'Swiss / Bauhaus',
+    icon: '🎨',
+    desc: 'Swiss Bauhaus design inspired, stark geometric shapes, high negative space'
+  }
+];
+
+const ASPECT_RATIOS = [
+  { id: '1:1', label: '1:1 Square', sub: 'LinkedIn Feed Standard', dimensions: '1024×1024' },
+  { id: '16:9', label: '16:9 Landscape', sub: 'Hero & Article Banner', dimensions: '1792×1024' }
+];
 
 function StudioWorkspaceContent() {
   const searchParams = useSearchParams();
@@ -43,6 +93,18 @@ function StudioWorkspaceContent() {
   const [editBody, setEditBody] = useState('');
   const [editCta, setEditCta] = useState('');
   const [editTitle, setEditTitle] = useState('');
+
+  // AI Image Generation & Media States
+  const [draftMediaList, setDraftMediaList] = useState([]);
+  const [selectedMediaAsset, setSelectedMediaAsset] = useState(null);
+  const [selectedImageStyle, setSelectedImageStyle] = useState('tech_illustration');
+  const [selectedAspectRatio, setSelectedAspectRatio] = useState('1:1');
+  const [customImagePrompt, setCustomImagePrompt] = useState('');
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [isGeneratingVariation, setIsGeneratingVariation] = useState(false);
+  const [isGeneratingPrompt, setIsGeneratingPrompt] = useState(false);
+  const [isPromptModalOpen, setIsPromptModalOpen] = useState(false);
+  const [promptPreviewData, setPromptPreviewData] = useState(null);
 
   // UI Feedback States
   const [loadingArticles, setLoadingArticles] = useState(true);
@@ -142,6 +204,152 @@ function StudioWorkspaceContent() {
     setContentAngle(draft.contentAngle || '');
     setTargetAudience(draft.targetAudience || 'Industry professionals');
     setPreferredStyle(draft.preferredStyle || 'authoritative');
+    if (draft?._id) {
+      fetchDraftMedia(draft._id);
+    }
+  };
+
+  // Fetch media assets linked to current draft
+  const fetchDraftMedia = async (draftId) => {
+    try {
+      const res = await mediaApi.getDraftMedia(draftId);
+      if (res?.data) {
+        const assets = res.data.mediaAssets || [];
+        setDraftMediaList(assets);
+        const preferred = assets.find(
+          (m) => m._id === res.data.selectedMediaAssetId || m.isPreferred
+        );
+        setSelectedMediaAsset(preferred || assets[0] || null);
+      }
+    } catch (err) {
+      console.warn('Could not load draft media assets:', err.message);
+    }
+  };
+
+  // AI Media Handlers
+  const handleGenerateImage = async (customPromptOverride = null) => {
+    if (!currentDraft) return;
+    setIsGeneratingImage(true);
+    setError('');
+    try {
+      const payload = {
+        draftId: currentDraft._id,
+        imageStyle: selectedImageStyle,
+        aspectRatio: selectedAspectRatio,
+        customPrompt: customPromptOverride || customImagePrompt.trim() || undefined
+      };
+      const res = await mediaApi.generateImage(payload);
+      if (res?.data) {
+        const newAsset = res.data.mediaAsset;
+        setDraftMediaList((prev) => {
+          const filtered = prev.filter((item) => item._id !== newAsset._id);
+          return [newAsset, ...filtered];
+        });
+        setSelectedMediaAsset(newAsset);
+        showToast('Generated professional visual with DALL-E 3 & Cloudinary!');
+      }
+    } catch (err) {
+      setError(err.message || 'Image generation failed. Please try again.');
+    } finally {
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const handleGenerateVariation = async (style = null) => {
+    if (!currentDraft) return;
+    setIsGeneratingVariation(true);
+    setError('');
+    try {
+      const payload = {
+        imageStyle: style || selectedImageStyle,
+        aspectRatio: selectedAspectRatio
+      };
+      const res = await mediaApi.generateVariation(currentDraft._id, payload);
+      if (res?.data) {
+        const newAsset = res.data.mediaAsset;
+        setDraftMediaList((prev) => [newAsset, ...prev]);
+        setSelectedMediaAsset(newAsset);
+        showToast('Created new visual variation!');
+      }
+    } catch (err) {
+      setError(err.message || 'Variation generation failed.');
+    } finally {
+      setIsGeneratingVariation(false);
+    }
+  };
+
+  const handleSelectPreferredImage = async (assetId) => {
+    if (!assetId) return;
+    try {
+      const res = await mediaApi.selectPreferred(assetId);
+      if (res?.data) {
+        setDraftMediaList((prev) =>
+          prev.map((item) => ({
+            ...item,
+            isPreferred: item._id === assetId
+          }))
+        );
+        setSelectedMediaAsset(res.data.mediaAsset);
+        showToast('Selected as primary LinkedIn post visual!');
+      }
+    } catch (err) {
+      setError(err.message || 'Could not select preferred image.');
+    }
+  };
+
+  const handleDeleteImage = async (assetId) => {
+    if (!assetId) return;
+    if (!confirm('Are you sure you want to delete this generated image?')) return;
+    try {
+      await mediaApi.delete(assetId);
+      setDraftMediaList((prev) => {
+        const updated = prev.filter((item) => item._id !== assetId);
+        if (selectedMediaAsset?._id === assetId) {
+          setSelectedMediaAsset(updated[0] || null);
+        }
+        return updated;
+      });
+      showToast('Image deleted from Cloudinary & storage.');
+    } catch (err) {
+      setError(err.message || 'Failed to delete image.');
+    }
+  };
+
+  const handlePreviewPrompt = async () => {
+    if (!currentDraft) return;
+    setIsGeneratingPrompt(true);
+    setError('');
+    try {
+      const res = await mediaApi.generatePrompt({
+        draftId: currentDraft._id,
+        imageStyle: selectedImageStyle,
+        aspectRatio: selectedAspectRatio
+      });
+      if (res?.data) {
+        setPromptPreviewData({
+          ...res.data,
+          imageStyle: selectedImageStyle,
+          aspectRatio: selectedAspectRatio
+        });
+        setCustomImagePrompt(res.data.prompt);
+        setIsPromptModalOpen(true);
+      }
+    } catch (err) {
+      setError(err.message || 'Could not generate visual prompt preview.');
+    } finally {
+      setIsGeneratingPrompt(false);
+    }
+  };
+
+  const handleDownloadImage = (url, style) => {
+    if (!url) return;
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.download = `linkedin-visual-${style || 'post'}-${Date.now()}.webp`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   // 3. Generate Posts Handler
@@ -1147,6 +1355,65 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                     </div>
                   )}
 
+                  {/* Primary LinkedIn Attached Image */}
+                  {selectedMediaAsset && (
+                    <div className="mt-4 rounded-xl overflow-hidden border border-slate-200 bg-slate-950 group relative shadow-xs">
+                      <div
+                        className={`w-full relative overflow-hidden flex items-center justify-center bg-slate-950 ${
+                          selectedMediaAsset.dimensions?.aspectRatio === '16:9'
+                            ? 'aspect-video'
+                            : 'aspect-square max-h-[460px]'
+                        }`}
+                      >
+                        <img
+                          src={selectedMediaAsset.secureUrl}
+                          alt={selectedMediaAsset.altText || selectedMediaAsset.concept || 'LinkedIn Post Graphic'}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.01]"
+                          loading="lazy"
+                        />
+
+                        {/* Top Badges */}
+                        <div className="absolute top-3 left-3 flex items-center gap-2">
+                          <span className="px-2.5 py-1 rounded-md text-[10px] font-bold bg-slate-900/80 backdrop-blur-md text-white border border-slate-700/60 flex items-center gap-1.5 shadow-xs">
+                            <span>{IMAGE_STYLES.find((s) => s.id === selectedMediaAsset.imageStyle)?.icon || '🖼️'}</span>
+                            <span>{IMAGE_STYLES.find((s) => s.id === selectedMediaAsset.imageStyle)?.name || selectedMediaAsset.imageStyle}</span>
+                          </span>
+                          <span className="px-2 py-1 rounded-md text-[9px] font-bold bg-slate-900/80 backdrop-blur-md text-slate-300 border border-slate-700/60 shadow-xs">
+                            {selectedMediaAsset.dimensions?.width}×{selectedMediaAsset.dimensions?.height} • {selectedMediaAsset.generationModel?.toUpperCase() || 'DALL-E 3'}
+                          </span>
+                        </div>
+
+                        {/* Top Right Quick Actions */}
+                        <div className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadImage(selectedMediaAsset.secureUrl, selectedMediaAsset.imageStyle)}
+                            title="Download full-resolution image"
+                            className="px-2.5 py-1 rounded-lg bg-slate-900/85 hover:bg-slate-900 text-white text-xs border border-slate-700/60 backdrop-blur-md shadow-md cursor-pointer transition-colors flex items-center gap-1"
+                          >
+                            <span>⬇️</span>
+                            <span>Download</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteImage(selectedMediaAsset._id)}
+                            title="Delete this image"
+                            className="p-1.5 rounded-lg bg-red-900/85 hover:bg-red-900 text-red-200 text-xs border border-red-700/60 backdrop-blur-md shadow-md cursor-pointer transition-colors"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+
+                        {/* Bottom Concept Overlay */}
+                        {selectedMediaAsset.concept && (
+                          <div className="absolute bottom-0 inset-x-0 p-3 bg-gradient-to-t from-slate-950/90 via-slate-950/50 to-transparent text-[11px] text-slate-200 line-clamp-1 pointer-events-none">
+                            {selectedMediaAsset.concept}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Suggested Image Concept Box */}
                   {currentVariation?.suggestedImageConcept && (
                     <div className="mt-4 p-4 rounded-xl bg-purple-50/60 border border-purple-200 text-xs space-y-1">
@@ -1202,6 +1469,236 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
                   </div>
                 </div>
               </div>
+
+              {/* ========================================================= */}
+              {/* AI IMAGE GENERATION STUDIO & VARIATIONS GALLERY           */}
+              {/* ========================================================= */}
+              <div className="bg-white border border-slate-200/80 rounded-2xl p-6 shadow-xs space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-3 pb-2 border-b border-slate-100">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm">🎨</span>
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-slate-900">
+                        AI Visual Studio (DALL-E 3 & Cloudinary)
+                      </h3>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-100 text-purple-800">
+                        {draftMediaList.length} Graphic{draftMediaList.length === 1 ? '' : 's'} Created
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Generate professional, text-free LinkedIn editorial graphics or 3D illustrations. Generating images preserves post text intact.
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handlePreviewPrompt}
+                      disabled={isGeneratingPrompt || isGeneratingImage}
+                      className="px-3 py-1.5 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <span>🔍</span>
+                      <span>{isGeneratingPrompt ? 'Analyzing...' : 'Preview / Edit Prompt'}</span>
+                    </button>
+                    {draftMediaList.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateVariation()}
+                        disabled={isGeneratingVariation || isGeneratingImage}
+                        className="px-3.5 py-1.5 rounded-xl border border-purple-200 bg-purple-50/70 hover:bg-purple-100/70 text-purple-900 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                      >
+                        <span>✨</span>
+                        <span>{isGeneratingVariation ? 'Generating...' : '+ Add Another Variation'}</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 1. Style Selection Cards */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Select Visual Aesthetic Style
+                  </label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {IMAGE_STYLES.map((style) => {
+                      const isSelected = selectedImageStyle === style.id;
+                      return (
+                        <div
+                          key={style.id}
+                          onClick={() => setSelectedImageStyle(style.id)}
+                          className={`p-3.5 rounded-xl border-2 transition-all cursor-pointer flex flex-col justify-between ${
+                            isSelected
+                              ? 'border-purple-600 bg-purple-50/40 text-slate-900 shadow-xs ring-2 ring-purple-600/10'
+                              : 'border-slate-200 hover:border-slate-300 bg-white text-slate-700'
+                          }`}
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="flex items-center gap-1.5 font-bold">
+                                <span>{style.icon}</span>
+                                <span>{style.name}</span>
+                              </span>
+                              <span
+                                className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${
+                                  isSelected ? 'bg-purple-600 text-white' : 'bg-slate-100 text-slate-500'
+                                }`}
+                              >
+                                {style.badge}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-slate-500 leading-snug">{style.desc}</p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Aspect Ratio & Generation Controls */}
+                <div className="flex flex-wrap items-center justify-between gap-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-slate-700">Aspect Ratio:</span>
+                    <div className="flex items-center gap-1.5">
+                      {ASPECT_RATIOS.map((ratio) => (
+                        <button
+                          key={ratio.id}
+                          type="button"
+                          onClick={() => setSelectedAspectRatio(ratio.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                            selectedAspectRatio === ratio.id
+                              ? 'bg-slate-900 text-white shadow-xs'
+                              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {ratio.label} ({ratio.dimensions})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => handleGenerateImage()}
+                    disabled={isGeneratingImage || isGeneratingVariation}
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-bold shadow-md hover:shadow-lg transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                  >
+                    <span>{isGeneratingImage ? '⏳' : '🎨'}</span>
+                    <span>
+                      {isGeneratingImage
+                        ? 'Synthesizing with DALL-E 3 & Cloudinary...'
+                        : 'Generate AI Post Graphic'}
+                    </span>
+                  </button>
+                </div>
+
+                {/* 3. Generated Variations Gallery */}
+                {draftMediaList.length > 0 && (
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                        Generated Image Variations ({draftMediaList.length})
+                      </span>
+                      <span className="text-[11px] text-slate-400">
+                        Click any variation to inspect or set as preferred LinkedIn visual
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
+                      {draftMediaList.map((media) => {
+                        const isPreferred = selectedMediaAsset?._id === media._id;
+                        const styleMeta = IMAGE_STYLES.find((s) => s.id === media.imageStyle);
+                        return (
+                          <div
+                            key={media._id}
+                            className={`rounded-xl border-2 overflow-hidden transition-all bg-white flex flex-col justify-between ${
+                              isPreferred
+                                ? 'border-purple-600 ring-2 ring-purple-500/20 shadow-md'
+                                : 'border-slate-200 hover:border-slate-300 shadow-2xs'
+                            }`}
+                          >
+                            {/* Thumbnail */}
+                            <div
+                              onClick={() => handleSelectPreferredImage(media._id)}
+                              className="w-full aspect-video bg-slate-900 relative overflow-hidden cursor-pointer group"
+                            >
+                              <img
+                                src={media.secureUrl}
+                                alt={media.concept || 'Post variation'}
+                                className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                                loading="lazy"
+                              />
+                              {isPreferred && (
+                                <div className="absolute top-2 left-2 px-2 py-0.5 rounded-md bg-purple-600 text-white text-[10px] font-bold shadow-xs flex items-center gap-1">
+                                  <span>✓</span>
+                                  <span>Primary Post Visual</span>
+                                </div>
+                              )}
+                              <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-slate-900/80 text-white text-[9px] font-mono">
+                                {media.dimensions?.aspectRatio || '1:1'}
+                              </div>
+                            </div>
+
+                            {/* Meta & Actions */}
+                            <div className="p-3 space-y-2">
+                              <div className="flex items-center justify-between text-xs">
+                                <span className="font-bold text-slate-800 flex items-center gap-1">
+                                  <span>{styleMeta?.icon || '🖼️'}</span>
+                                  <span>{styleMeta?.name || media.imageStyle}</span>
+                                </span>
+                                <span className="text-[10px] text-slate-400">
+                                  {media.dimensions?.width}×{media.dimensions?.height}
+                                </span>
+                              </div>
+
+                              {media.concept && (
+                                <p className="text-[11px] text-slate-500 line-clamp-2 leading-relaxed">
+                                  {media.concept}
+                                </p>
+                              )}
+
+                              <div className="flex items-center justify-between gap-1 pt-1 border-t border-slate-100">
+                                {!isPreferred ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSelectPreferredImage(media._id)}
+                                    className="text-[11px] font-bold text-purple-600 hover:text-purple-700 cursor-pointer"
+                                  >
+                                    Set as Primary
+                                  </button>
+                                ) : (
+                                  <span className="text-[11px] font-bold text-emerald-600 flex items-center gap-0.5">
+                                    <span>✓</span>
+                                    <span>Selected</span>
+                                  </span>
+                                )}
+
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDownloadImage(media.secureUrl, media.imageStyle)}
+                                    title="Download image"
+                                    className="p-1 rounded text-slate-500 hover:text-slate-800 hover:bg-slate-100 text-xs cursor-pointer"
+                                  >
+                                    ⬇️
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteImage(media._id)}
+                                    title="Delete image"
+                                    className="p-1 rounded text-red-500 hover:text-red-700 hover:bg-red-50 text-xs cursor-pointer"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1238,6 +1735,94 @@ ${activeVar.sourceAttribution || currentDraft.sourceAttribution || ''}`;
               >
                 {generating ? 'Re-synthesizing...' : 'Apply & Regenerate'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Visual Prompt Preview & Direct Generator Modal */}
+      {isPromptModalOpen && promptPreviewData && (
+        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <span className="text-base">🎨</span>
+                <h3 className="text-sm font-bold text-slate-900">
+                  DALL-E 3 Visual Prompt & Concept Preview
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsPromptModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Synthesized Concept */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                Synthesized Graphic Concept
+              </label>
+              <div className="p-3 rounded-xl bg-purple-50/70 border border-purple-200 text-xs text-purple-900 leading-relaxed font-medium">
+                {promptPreviewData.concept}
+              </div>
+            </div>
+
+            {/* Strict Quality Guarantee Notice */}
+            <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 text-[11px] text-slate-600 space-y-1">
+              <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                <span>🛡️</span>
+                <span>Anti-Artifact & Text-Free Directives Enforced</span>
+              </div>
+              <p>
+                Prompt automatically prohibits text, letters, fake logos, garbled typography, and watermarks to ensure maximum LinkedIn visual professionalism.
+              </p>
+            </div>
+
+            {/* Editable Prompt */}
+            <div className="space-y-1">
+              <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center justify-between">
+                <span>Full DALL-E 3 Image Prompt</span>
+                <span className="text-[10px] text-slate-400 font-normal">
+                  ({customImagePrompt.length} chars)
+                </span>
+              </label>
+              <textarea
+                rows={5}
+                value={customImagePrompt}
+                onChange={(e) => setCustomImagePrompt(e.target.value)}
+                className="w-full text-xs font-mono bg-slate-50 border border-slate-200 rounded-xl p-3 text-slate-800 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+              />
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-between pt-2">
+              <div className="text-[11px] text-slate-400">
+                Style: <span className="font-bold text-slate-700">{promptPreviewData.imageStyle}</span> • Ratio: <span className="font-bold text-slate-700">{promptPreviewData.aspectRatio}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsPromptModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                >
+                  Close
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsPromptModalOpen(false);
+                    handleGenerateImage(customImagePrompt);
+                  }}
+                  disabled={isGeneratingImage || !customImagePrompt.trim()}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold shadow-xs cursor-pointer flex items-center gap-1.5"
+                >
+                  <span>🚀</span>
+                  <span>Generate Graphic Now</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

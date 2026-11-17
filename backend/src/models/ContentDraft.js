@@ -249,6 +249,11 @@ const contentDraftSchema = new mongoose.Schema(
         ref: 'MediaAsset'
       }
     ],
+    selectedMediaAsset: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'MediaAsset',
+      default: null
+    },
     revisionHistory: {
       type: [revisionSchema],
       default: []

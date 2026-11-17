@@ -34,6 +34,36 @@ const mediaAssetSchema = new mongoose.Schema(
       default: 'single-image',
       index: true
     },
+    imageStyle: {
+      type: String,
+      enum: [
+        'editorial',
+        'tech_illustration',
+        'business_illustration',
+        'news_graphic',
+        'data_visual',
+        'minimalist_concept'
+      ],
+      default: 'editorial',
+      index: true
+    },
+    generationModel: {
+      type: String,
+      default: 'dall-e-3'
+    },
+    revisedPrompt: {
+      type: String,
+      default: ''
+    },
+    concept: {
+      type: String,
+      default: ''
+    },
+    isPreferred: {
+      type: Boolean,
+      default: false,
+      index: true
+    },
     format: {
       type: String,
       default: 'webp'

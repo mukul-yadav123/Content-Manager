@@ -340,6 +340,41 @@ export const profileApi = {
 };
 
 /**
+ * AI Media Generation Endpoints
+ */
+export const mediaApi = {
+  generateImage: (payload) =>
+    apiRequest('/media/generate', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  generateVariation: (draftId, payload) =>
+    apiRequest(`/media/drafts/${draftId}/variation`, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  generatePrompt: (payload) =>
+    apiRequest('/media/generate-prompt', {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    }),
+
+  getDraftMedia: (draftId) => apiRequest(`/media/drafts/${draftId}`),
+
+  selectPreferred: (id) =>
+    apiRequest(`/media/${id}/select`, {
+      method: 'PATCH'
+    }),
+
+  delete: (id) =>
+    apiRequest(`/media/${id}`, {
+      method: 'DELETE'
+    })
+};
+
+/**
  * Health check endpoints
  */
 export const healthApi = {
@@ -354,6 +389,7 @@ export default {
   newsApi,
   studioApi,
   profileApi,
+  mediaApi,
   dashboardApi,
   healthApi,
   getAuthToken,

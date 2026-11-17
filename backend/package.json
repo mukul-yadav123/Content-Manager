@@ -15,7 +15,8 @@
     "test:research": "node src/tests/research.test.js",
     "test:studio": "node src/tests/postGeneration.test.js",
     "test:humanization": "node src/tests/humanization.test.js",
-    "test": "node src/tests/models.test.js && node src/tests/auth.test.js && node src/tests/topics.test.js && node src/tests/news.test.js && node src/tests/ranking.test.js && node src/tests/research.test.js && node src/tests/postGeneration.test.js && node src/tests/humanization.test.js"
+    "test:media": "node src/tests/media.test.js",
+    "test": "node src/tests/models.test.js && node src/tests/auth.test.js && node src/tests/topics.test.js && node src/tests/news.test.js && node src/tests/ranking.test.js && node src/tests/research.test.js && node src/tests/postGeneration.test.js && node src/tests/humanization.test.js && node src/tests/media.test.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
