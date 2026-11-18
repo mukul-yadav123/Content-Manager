@@ -35,7 +35,8 @@ export const buildImagePrompt = ({
   const stylePrefix = IMAGE_STYLE_DESCRIPTIONS[style] || IMAGE_STYLE_DESCRIPTIONS.editorial;
   const coreSubject = concept || headline || summary || 'Strategic technological innovation';
 
-  const prompt = `${stylePrefix} Visual Subject: ${coreSubject}. Composition: Balanced, professional, premium lighting, LinkedIn-appropriate business aesthetic. ${STRICT_NEGATIVE_IMAGE_INSTRUCTIONS}`;
+  // Core visual subject placed first to give it the highest model weight and attention
+  const prompt = `Visual Subject: ${coreSubject}. Style & Aesthetic: ${stylePrefix} Composition: Balanced, professional, premium lighting, LinkedIn-appropriate business aesthetic. ${STRICT_NEGATIVE_IMAGE_INSTRUCTIONS}`;
 
   const size = aspectRatio === '16:9' ? '1792x1024' : '1024x1024';
 

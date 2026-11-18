@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import env from '../../config/env.js';
 import logger from '../../utils/logger.js';
+import { renderEditorialGraphicBuffer } from '../renderer/htmlSlideRenderer.service.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,7 +89,8 @@ export const uploadImageBuffer = async (
 export const uploadImageFromUrl = async (
   remoteUrl,
   folder = 'images',
-  style = 'editorial'
+  style = 'editorial',
+  metadata = {}
 ) => {
   initLocalStorage();
 
@@ -99,7 +101,7 @@ export const uploadImageFromUrl = async (
   const filename = `post_${style}_${Date.now()}_${randomHash}.png`;
   const filePath = path.join(targetDir, filename);
 
-  let imageBuffer = FALLBACK_PNG_BUFFER;
+  let imageBuffer = null;
 
   if (remoteUrl && typeof remoteUrl === 'string' && !remoteUrl.includes('mock') && !remoteUrl.includes('placeholder')) {
     try {
@@ -118,12 +120,35 @@ export const uploadImageFromUrl = async (
           const arrayBuf = await response.arrayBuffer();
           imageBuffer = Buffer.from(arrayBuf);
         } else {
-          logger.warn(`Could not fetch remote image URL (HTTP ${response.status} ${response.statusText}). Writing local fallback placeholder.`);
+          logger.warn(`Could not fetch remote image URL (HTTP ${response.status} ${response.statusText}). Rendering high-res editorial graphic card.`);
+          try {
+            imageBuffer = await renderEditorialGraphicBuffer({
+              title: metadata.title || '',
+              concept: metadata.concept || '',
+              style
+            });
+          } catch (rErr) {
+            logger.warn(`Could not render editorial graphic card (${rErr.message}).`);
+          }
         }
       }
     } catch (fetchErr) {
-      logger.warn(`Could not fetch remote image URL (${fetchErr.message}). Writing local fallback placeholder.`);
+      logger.warn(`Could not fetch remote image URL (${fetchErr.message}). Rendering high-res editorial graphic card.`);
+      try {
+        imageBuffer = await renderEditorialGraphicBuffer({
+          title: metadata.title || '',
+          concept: metadata.concept || '',
+          style
+        });
+      } catch (rErr) {
+        logger.warn(`Could not render editorial graphic card (${rErr.message}).`);
+      }
     }
+  }
+
+  // If both remote download and dynamic rendering were unavailable, use neutral slate fallback buffer
+  if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+    imageBuffer = FALLBACK_PNG_BUFFER;
   }
 
   try {

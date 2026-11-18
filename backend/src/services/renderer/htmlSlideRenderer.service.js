@@ -613,3 +613,147 @@ PUBLISHING TIPS FOR LINKEDIN:
   archive.finalize();
   return archive;
 };
+
+/**
+ * Renders a high-resolution 1024x1024 editorial visual graphic card buffer using Puppeteer
+ * Used as a dependable fallback when external AI image generation APIs are unavailable or rate-limited.
+ */
+export const renderEditorialGraphicBuffer = async ({
+  title = '',
+  concept = '',
+  style = 'editorial',
+  width = 1024,
+  height = 1024
+}) => {
+  const browserPath = getBrowserExecutablePath();
+  if (!browserPath) return null;
+
+  let browser = null;
+  try {
+    browser = await puppeteer.launch({
+      executablePath: browserPath,
+      headless: 'new',
+      args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+    });
+    const page = await browser.newPage();
+    await page.setViewport({ width, height, deviceScaleFactor: 1 });
+
+    const styleName = style.replace(/_/g, ' ').toUpperCase();
+    const safeTitle = (title || 'AI Thought Leadership').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeConcept = (concept || title || 'Strategic Industry Innovation').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body {
+    width: ${width}px;
+    height: ${height}px;
+    background: radial-gradient(circle at 75% 20%, #1e1b4b 0%, #0f172a 45%, #020617 100%);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: 72px;
+    position: relative;
+    overflow: hidden;
+    color: #f8fafc;
+  }
+  .glow-mesh {
+    position: absolute;
+    top: -20%;
+    right: -20%;
+    width: 650px;
+    height: 650px;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.25) 0%, rgba(147, 51, 234, 0.08) 50%, transparent 70%);
+    filter: blur(50px);
+    pointer-events: none;
+  }
+  .subtle-grid {
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 64px 64px;
+    opacity: 0.8;
+  }
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    backdrop-filter: blur(8px);
+    padding: 10px 18px;
+    border-radius: 9999px;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #c7d2fe;
+    width: fit-content;
+    z-index: 10;
+  }
+  .content {
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    max-width: 880px;
+  }
+  .title {
+    font-size: 42px;
+    font-weight: 800;
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    background: linear-gradient(135deg, #ffffff 30%, #cbd5e1 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .concept-box {
+    background: rgba(15, 23, 42, 0.65);
+    border-left: 4px solid #818cf8;
+    border-radius: 0 16px 16px 0;
+    padding: 20px 24px;
+    backdrop-filter: blur(12px);
+    font-size: 18px;
+    line-height: 1.5;
+    color: #94a3b8;
+  }
+  .footer {
+    z-index: 10;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    padding-top: 28px;
+    font-size: 14px;
+    color: #64748b;
+    font-weight: 600;
+  }
+</style>
+</head>
+<body>
+  <div class="glow-mesh"></div>
+  <div class="subtle-grid"></div>
+  <div class="badge">✦ ${styleName}</div>
+  <div class="content">
+    <h1 class="title">${safeTitle}</h1>
+    <div class="concept-box">${safeConcept}</div>
+  </div>
+  <div class="footer">
+    <span>LinkedIn Editorial Visual</span>
+    <span>AI Visual Studio</span>
+  </div>
+</body>
+</html>`;
+
+    await page.setContent(html, { waitUntil: 'load' });
+    const buffer = await page.screenshot({ type: 'png', omitBackground: false });
+    return buffer;
+  } catch (err) {
+    logger.warn(`Failed to render fallback editorial card with puppeteer: ${err.message}`);
+    return null;
+  } finally {
+    if (browser) await browser.close();
+  }
+};

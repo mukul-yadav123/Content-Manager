@@ -18,10 +18,15 @@ const MOCK_VISUAL_FALLBACKS = {
  * Upload Image from remote URL
  * Uses local server storage with auto-pruning by default, or Cloudinary if configured
  */
-export const uploadImageFromUrl = async (remoteUrl, folder = 'linkedin-content-studio/posts', style = 'editorial') => {
+export const uploadImageFromUrl = async (
+  remoteUrl,
+  folder = 'linkedin-content-studio/posts',
+  style = 'editorial',
+  metadata = {}
+) => {
   // Use local server storage when STORAGE_DRIVER is 'local' (default)
   if (env.STORAGE_DRIVER === 'local') {
-    return await localStorageService.uploadImageFromUrl(remoteUrl, folder, style);
+    return await localStorageService.uploadImageFromUrl(remoteUrl, folder, style, metadata);
   }
 
   const isMock =

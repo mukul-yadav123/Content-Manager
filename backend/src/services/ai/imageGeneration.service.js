@@ -111,10 +111,47 @@ export const synthesizeImagePrompt = async ({
 };
 
 /**
+ * Constructs a content-matched image generation URL for fallback when external LLM/DALL-E is unreachable.
+ * Ensures the primary visual subject (e.g., Jensen Huang, Nvidia logo, data flowchart) is placed
+ * directly at the beginning of the prompt so it is never truncated, and appends a unique seed to prevent CDN caching.
+ */
+export const buildDynamicFallbackUrl = ({
+  prompt = '',
+  concept = '',
+  headline = '',
+  style = 'editorial',
+  size = '1024x1024'
+}) => {
+  let subject = (concept && concept.trim()) || (headline && headline.trim()) || '';
+  if (!subject && prompt) {
+    const match = prompt.match(/Visual Subject:\s*([^.]+)/i);
+    if (match && match[1]) {
+      subject = match[1].trim();
+    } else {
+      subject = prompt.substring(0, 200);
+    }
+  }
+
+  const styleDesc = IMAGE_STYLE_DESCRIPTIONS[style] || style?.replace(/_/g, ' ') || 'professional illustration';
+  // Subject placed strictly at front, followed by style aesthetics and quality guidelines
+  const fallbackPrompt = `${subject}. Visual Style: ${styleDesc}. Hyper-detailed professional visual artwork, strictly text-free, no logos, clean lighting.`;
+  const encodedPrompt = encodeURIComponent(fallbackPrompt.substring(0, 1000));
+
+  const [w, h] = (size || '1024x1024').split('x').map(Number);
+  const width = w || 1024;
+  const height = h || 1024;
+  const seed = Math.floor(Math.random() * 10000000);
+
+  return `https://image.pollinations.ai/prompt/${encodedPrompt}?width=${width}&height=${height}&nologo=true&seed=${seed}`;
+};
+
+/**
  * Call OpenAI Image API to generate an image based strictly on post content
  */
 export const generateImageFromOpenAI = async ({
   prompt,
+  concept = '',
+  headline = '',
   size = '1024x1024',
   style = 'editorial',
   model = env.OPENAI_IMAGE_MODEL || 'gpt-image-1-mini'
@@ -125,12 +162,12 @@ export const generateImageFromOpenAI = async ({
     env.OPENAI_API_KEY.includes('replace');
 
   if (isMock) {
-    logger.info(`OpenAI key is mock or unset. Generating content-matched visual for: "${prompt.substring(0, 60)}..."`);
-    const encodedPrompt = encodeURIComponent(prompt.substring(0, 200));
-    const dynamicUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`;
+    logger.info(`OpenAI key is mock or unset. Generating content-matched visual for: "${(concept || prompt).substring(0, 60)}..."`);
+    const dynamicUrl = buildDynamicFallbackUrl({ prompt, concept, headline, style, size });
     return {
       imageUrl: dynamicUrl,
-      revisedPrompt: prompt
+      revisedPrompt: prompt,
+      modelUsed: 'content-matched-visual'
     };
   }
 
@@ -199,8 +236,7 @@ export const generateImageFromOpenAI = async ({
 
   // Fallback: If OpenAI API models fail, generate dynamic visual matched to the post content
   logger.warn(`All OpenAI image models failed (${lastError?.message}). Using content-matched visual fallback.`);
-  const encodedPrompt = encodeURIComponent(prompt.substring(0, 200));
-  const dynamicFallbackUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true`;
+  const dynamicFallbackUrl = buildDynamicFallbackUrl({ prompt, concept, headline, style, size });
 
   return {
     imageUrl: dynamicFallbackUrl,
@@ -242,9 +278,11 @@ export const generateAndSavePostImage = async ({
 
   const dimensions = aspectRatio === '16:9' ? '1792x1024' : '1024x1024';
 
-  // 2. Generate Image via OpenAI
+  // 2. Generate Image via OpenAI (or content-matched visual model if OpenAI quota exhausted)
   const { imageUrl, revisedPrompt, modelUsed } = await generateImageFromOpenAI({
     prompt: finalPrompt,
+    concept: finalConcept,
+    headline: draft.title || '',
     size: dimensions,
     style,
     model: env.OPENAI_IMAGE_MODEL || 'gpt-image-1-mini'
@@ -265,11 +303,12 @@ export const generateAndSavePostImage = async ({
     ? `${styleLabel} – ${finalConcept.substring(0, 120)}`
     : `${styleLabel} visual for ${draft.title}`;
 
-  // 3. Upload to Cloudinary
+  // 3. Upload to Cloudinary / Local Storage
   const uploadResult = await cloudinaryService.uploadImageFromUrl(
     imageUrl,
     'linkedin-content-studio/posts',
-    style
+    style,
+    { title: draft.title, concept: finalConcept }
   );
 
   // 4. Save MediaAsset in MongoDB with Cloudinary rollback protection
