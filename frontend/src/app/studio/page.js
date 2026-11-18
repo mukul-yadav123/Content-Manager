@@ -485,11 +485,17 @@ function StudioWorkspaceContent() {
     setIsGeneratingImage(true);
     setError('');
     try {
+      const activeConcept =
+        currentVariation?.suggestedImageConcept ||
+        currentDraft?.suggestedImageConcept ||
+        '';
+
       const payload = {
         draftId: currentDraft._id,
         style: selectedImageStyle,
         imageStyle: selectedImageStyle,
         aspectRatio: selectedAspectRatio,
+        concept: activeConcept || undefined,
         customPrompt: customPromptOverride || customImagePrompt.trim() || undefined
       };
       const res = await mediaApi.generateImage(payload);
@@ -518,10 +524,16 @@ function StudioWorkspaceContent() {
     setError('');
     try {
       const chosenStyle = style || selectedImageStyle;
+      const activeConcept =
+        currentVariation?.suggestedImageConcept ||
+        currentDraft?.suggestedImageConcept ||
+        '';
+
       const payload = {
         style: chosenStyle,
         imageStyle: chosenStyle,
-        aspectRatio: selectedAspectRatio
+        aspectRatio: selectedAspectRatio,
+        concept: activeConcept || undefined
       };
       const res = await mediaApi.generateVariation(currentDraft._id, payload);
       if (res?.data) {
@@ -588,11 +600,17 @@ function StudioWorkspaceContent() {
     setIsGeneratingPrompt(true);
     setError('');
     try {
+      const activeConcept =
+        currentVariation?.suggestedImageConcept ||
+        currentDraft?.suggestedImageConcept ||
+        '';
+
       const res = await mediaApi.generatePrompt({
         draftId: currentDraft._id,
         style: selectedImageStyle,
         imageStyle: selectedImageStyle,
-        aspectRatio: selectedAspectRatio
+        aspectRatio: selectedAspectRatio,
+        concept: activeConcept || undefined
       });
       if (res?.data) {
         setPromptPreviewData({

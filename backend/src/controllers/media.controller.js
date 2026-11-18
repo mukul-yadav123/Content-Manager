@@ -36,7 +36,15 @@ export const generateImage = asyncHandler(async (req, res) => {
     throw ApiError.notFound('Content draft not found');
   }
 
-  // 2. Fetch associated Article and Topic if available
+  // 2. Resolve target visual concept from payload, selected variation, or draft
+  const activeVariation = draft.variations?.find((v) => v.approach === draft.selectedApproach) || draft.variations?.[0];
+  const targetConcept =
+    (concept && concept.trim()) ||
+    activeVariation?.suggestedImageConcept ||
+    draft.suggestedImageConcept ||
+    '';
+
+  // 3. Fetch associated Article and Topic if available
   let article = null;
   let topic = null;
   if (draft.newsArticleId) {
@@ -46,13 +54,13 @@ export const generateImage = asyncHandler(async (req, res) => {
     topic = await Topic.findById(draft.topicId);
   }
 
-  logger.info(`Generating ${activeStyle} image for draft "${draft.title}" (User: ${req.user._id})`);
+  logger.info(`Generating ${activeStyle} image for draft "${draft.title}" with concept: "${targetConcept.substring(0, 50)}..." (User: ${req.user._id})`);
 
-  // 3. Generate and Save Media Asset wrapped in GenerationJob lifecycle
+  // 4. Generate and Save Media Asset wrapped in GenerationJob lifecycle
   const mediaAsset = await trackGenerationJob({
     userId: req.user._id,
     jobType: 'image-generation',
-    inputParams: { draftId, style: activeStyle, customPrompt, concept, aspectRatio },
+    inputParams: { draftId, style: activeStyle, customPrompt, concept: targetConcept, aspectRatio },
     targetDraftId: draft._id,
     targetArticleId: draft.newsArticleId || null,
     execute: async () => {
@@ -62,7 +70,7 @@ export const generateImage = asyncHandler(async (req, res) => {
         topic,
         style: activeStyle,
         customPrompt,
-        concept,
+        concept: targetConcept,
         aspectRatio,
         userId: req.user._id
       });
@@ -97,6 +105,13 @@ export const generateVariation = asyncHandler(async (req, res) => {
     throw ApiError.notFound('Content draft not found');
   }
 
+  const activeVariation = draft.variations?.find((v) => v.approach === draft.selectedApproach) || draft.variations?.[0];
+  const targetConcept =
+    (concept && concept.trim()) ||
+    activeVariation?.suggestedImageConcept ||
+    draft.suggestedImageConcept ||
+    '';
+
   let article = null;
   let topic = null;
   if (draft.newsArticleId) {
@@ -106,7 +121,7 @@ export const generateVariation = asyncHandler(async (req, res) => {
     topic = await Topic.findById(draft.topicId);
   }
 
-  logger.info(`Generating variation (${activeStyle}) for draft "${draft.title}"`);
+  logger.info(`Generating variation (${activeStyle}) for draft "${draft.title}" with concept: "${targetConcept.substring(0, 50)}..."`);
 
   const mediaAsset = await imageGenerationService.generateAndSavePostImage({
     draft,
@@ -114,7 +129,7 @@ export const generateVariation = asyncHandler(async (req, res) => {
     topic,
     style: activeStyle,
     customPrompt,
-    concept,
+    concept: targetConcept,
     aspectRatio,
     userId: req.user._id
   });
@@ -139,6 +154,13 @@ export const generatePromptOnly = asyncHandler(async (req, res) => {
     throw ApiError.notFound('Content draft not found');
   }
 
+  const activeVariation = draft.variations?.find((v) => v.approach === draft.selectedApproach) || draft.variations?.[0];
+  const targetConcept =
+    (concept && concept.trim()) ||
+    activeVariation?.suggestedImageConcept ||
+    draft.suggestedImageConcept ||
+    '';
+
   let article = null;
   let topic = null;
   if (draft.newsArticleId) {
@@ -153,7 +175,7 @@ export const generatePromptOnly = asyncHandler(async (req, res) => {
     article,
     topic,
     style: activeStyle,
-    concept
+    concept: targetConcept
   });
 
   return res.status(200).json(ApiResponse.success(promptData, 'Detailed visual prompt generated successfully'));

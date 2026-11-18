@@ -29,103 +29,85 @@ export const synthesizeImagePrompt = async ({
   const topicName = topic?.name || article?.category || 'Technology';
   const contentAngle = draft?.contentAngle || '';
 
-  // Only treat an explicit user-provided concept as an override.
-  // draft.suggestedImageConcept is a rough hint from post generation — use it
-  // as supplementary context for the LLM, NOT as the final concept,
-  // because it was created before the user chose a visual style.
-  const userExplicitConcept = concept || '';
-  const draftHint = draft?.suggestedImageConcept || '';
+  // Extract the target visual concept: check explicit param, active variation, or draft
+  const activeVariation =
+    draft?.variations?.find((v) => v.approach === draft?.selectedApproach) ||
+    draft?.variations?.[0];
+  const effectiveConcept =
+    (concept && concept.trim()) ||
+    activeVariation?.suggestedImageConcept ||
+    draft?.suggestedImageConcept ||
+    '';
 
-  // Mock / fallback path: no real API key available
-  if (isMock) {
-    const fallbackConcept = userExplicitConcept
-      || `A symbolic visual representation of ${headline.replace(/\.$/, '')} focusing on strategic impact and operational execution.`;
+  // If a visual concept is provided or exists on the draft (e.g. "A headshot of Jensen Huang alongside a graphic of Nvidia's logo."):
+  // Build a prompt that pairs the selected visual style directly with this exact visual subject
+  if (effectiveConcept) {
     const promptObj = buildImagePrompt({
-      concept: fallbackConcept,
+      concept: effectiveConcept,
       headline,
       style,
       aspectRatio: '1:1'
     });
 
     return {
-      concept: fallbackConcept,
+      concept: effectiveConcept,
       prompt: promptObj.prompt,
       style,
-      altText: `${IMAGE_STYLE_DESCRIPTIONS[style] ? style.replace(/_/g, ' ') + ' visual' : 'Visual'} for ${headline}`,
+      altText: `${style.replace(/_/g, ' ')} – ${effectiveConcept.substring(0, 120)}`,
       size: promptObj.size
     };
   }
 
-  // If user explicitly provided a complete concept, use it directly
-  if (userExplicitConcept) {
-    const promptObj = buildImagePrompt({
-      concept: userExplicitConcept,
-      headline,
-      style,
-      aspectRatio: '1:1'
-    });
-    return {
-      concept: userExplicitConcept,
-      prompt: promptObj.prompt,
-      style,
-      altText: `${style.replace(/_/g, ' ')} visual for ${headline}`,
-      size: promptObj.size
-    };
+  // If no concept was available at all: synthesize via OpenAI LLM (if key configured)
+  if (!isMock) {
+    try {
+      const openai = getOpenAIClient();
+      const promptBlueprint = buildConceptSynthesisPrompt({
+        headline,
+        postContent,
+        topicName,
+        contentAngle,
+        style
+      });
+
+      const completion = await openai.chat.completions.create({
+        model: env.OPENAI_MODEL || 'gpt-4o-mini',
+        messages: [
+          { role: 'system', content: promptBlueprint.system },
+          { role: 'user', content: promptBlueprint.user }
+        ],
+        response_format: { type: 'json_object' },
+        temperature: 0.5
+      });
+
+      const raw = completion.choices?.[0]?.message?.content || '{}';
+      const parsed = JSON.parse(raw);
+
+      const synthesizedConcept = parsed.concept || `Visual metaphor for ${headline}`;
+      const detailedPrompt = parsed.detailedPrompt || buildImagePrompt({ concept: synthesizedConcept, headline, style }).prompt;
+
+      return {
+        concept: synthesizedConcept,
+        prompt: detailedPrompt,
+        style,
+        altText: parsed.altText || `${style.replace(/_/g, ' ')} illustration for ${headline}`,
+        size: '1024x1024'
+      };
+    } catch (err) {
+      logger.warn(`Concept synthesis via LLM failed (${err.message}). Using standard prompt builder.`);
+    }
   }
 
-  // LLM-powered concept synthesis: generates a concept that matches the
-  // selected visual style AND the actual post content
-  try {
-    const openai = getOpenAIClient();
-    const promptBlueprint = buildConceptSynthesisPrompt({
-      headline,
-      postContent,
-      topicName,
-      contentAngle,
-      style
-    });
-
-    // Append the draft's suggested concept as a hint (not as the answer)
-    const hintSuffix = draftHint
-      ? `\n\nOptional creative hint from the author (use as inspiration only, adapt to the target style): "${draftHint}"`
-      : '';
-
-    const completion = await openai.chat.completions.create({
-      model: env.OPENAI_MODEL || 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: promptBlueprint.system },
-        { role: 'user', content: promptBlueprint.user + hintSuffix }
-      ],
-      response_format: { type: 'json_object' },
-      temperature: 0.5
-    });
-
-    const raw = completion.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(raw);
-
-    const synthesizedConcept = parsed.concept || `Visual metaphor for ${headline}`;
-    const detailedPrompt = parsed.detailedPrompt || buildImagePrompt({ concept: synthesizedConcept, headline, style }).prompt;
-
-    return {
-      concept: synthesizedConcept,
-      prompt: detailedPrompt,
-      style,
-      altText: parsed.altText || `${style.replace(/_/g, ' ')} illustration for ${headline}`,
-      size: '1024x1024'
-    };
-  } catch (err) {
-    logger.warn(`Concept synthesis via LLM failed (${err.message}). Using standard prompt builder.`);
-    // Build a concept from the actual post content and style, not the stale suggestedImageConcept
-    const fallbackConcept = `A clean, professional ${style.replace(/_/g, ' ')} representing ${headline}`;
-    const built = buildImagePrompt({ concept: fallbackConcept, headline, style });
-    return {
-      concept: fallbackConcept,
-      prompt: built.prompt,
-      style,
-      altText: `${style.replace(/_/g, ' ')} visual for ${headline}`,
-      size: built.size
-    };
-  }
+  // Standard fallback when no concept and LLM is mock or failed
+  const fallbackConcept = `A clean, professional ${style.replace(/_/g, ' ')} representing ${headline}`;
+  const built = buildImagePrompt({ concept: fallbackConcept, headline, style });
+  return {
+    concept: fallbackConcept,
+    prompt: built.prompt,
+    style,
+    altText: `${style.replace(/_/g, ' ')} visual for ${headline}`,
+    size: built.size
+  };
 };
 
 /**
